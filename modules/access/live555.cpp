@@ -90,7 +90,7 @@ static void Close( vlc_object_t * );
 #define FRAME_BUFFER_SIZE_LONGTEXT N_("RTSP start frame buffer size of the video " \
     "track, can be increased in case of broken pictures due " \
     "to too small buffer.")
-#define DEFAULT_FRAME_BUFFER_SIZE 100000
+#define DEFAULT_FRAME_BUFFER_SIZE 250000
 
 vlc_module_begin ()
     set_description( N_("RTP/RTSP/SDP demuxer (using Live555)" ) )
@@ -170,13 +170,14 @@ typedef struct
     unsigned int    i_buffer;
 
     bool            b_rtcp_sync;
-    bool            b_discontinuity;
+    bool            b_flushing_discontinuity;
     int             i_next_block_flags;
     char            waiting;
     int64_t         i_lastpts;
     int64_t         i_pcr;
-    int64_t         i_offset;
+    //int64_t         i_offsett; this member has been removed by vlc developer. This member is also not useable for us, lead to produce a invalid pts.
     double          f_npt;
+    int             i_IFrameCount;    /* count I frame packet number, used for checking first I packet, or led to garbage display when playing first picture */ 
 
     bool            b_selected;
 
@@ -836,7 +837,7 @@ static int SessionsSetup( demux_t *p_demux )
             tk->p_out_muxed = NULL;
             tk->waiting     = 0;
             tk->b_rtcp_sync = false;
-            tk->b_discontinuity = false;
+            tk->b_flushing_discontinuity = false;
             tk->i_next_block_flags = 0;
             tk->i_lastpts   = VLC_TS_INVALID;
             tk->i_pcr       = VLC_TS_INVALID;
@@ -1025,6 +1026,7 @@ static int SessionsSetup( demux_t *p_demux )
 
                     tk->fmt.i_codec = VLC_CODEC_H264;
                     tk->fmt.b_packetized = false;
+                    tk->i_IFrameCount = 0;// Initialize to zero
 
                     if((p_extra=parseH264ConfigStr( sub->fmtp_spropparametersets(),
                                                     i_extra ) ) )
@@ -1343,10 +1345,11 @@ static int Demux( demux_t *p_demux )
     /* remove the task */
     p_sys->scheduler->unscheduleDelayedTask( task );
 
+//   msg_Dbg( p_demux, "Current p_sys->i_pcr1 = %lld",p_sys->i_pcr );
     if( b_send_pcr )
     {
         mtime_t i_minpcr = VLC_TS_INVALID;
-        bool b_discontinuity = false;
+        bool b_need_flush = false;
 
         /* Check for gap in pts value */
         for( i = 0; i < p_sys->i_track; i++ )
@@ -1358,15 +1361,15 @@ static int Demux( demux_t *p_demux )
                 continue;
 
             /* Check for gap in pts value */
-            b_discontinuity |= (tk->b_discontinuity);
-
-            if( i_minpcr == VLC_TS_INVALID || i_minpcr > tk->i_pcr )
+            b_need_flush |= (tk->b_flushing_discontinuity);
+            // Check pcr valid, will use the minimum tk->i_pcr as pcr between different tracks
+            if(tk->i_pcr > VLC_TS_INVALID && (i_minpcr == VLC_TS_INVALID || i_minpcr > tk->i_pcr ))
                 i_minpcr = tk->i_pcr;
         }
-
-        if( p_sys->i_pcr > VLC_TS_INVALID && b_discontinuity )
+        // Case for pcr set by rtcp SR
+        if( p_sys->i_pcr > VLC_TS_INVALID && b_need_flush )
         {
-            es_out_Control( p_demux->out, ES_OUT_MODIFY_PCR_SYSTEM, true, VLC_TS_0 + i_minpcr );
+            es_out_Control( p_demux->out, ES_OUT_RESET_PCR );
             p_sys->i_pcr = i_minpcr;
             p_sys->f_npt = 0.;
 
@@ -1374,19 +1377,25 @@ static int Demux( demux_t *p_demux )
             {
                 live_track_t *tk = p_sys->track[i];
                 tk->i_lastpts = VLC_TS_INVALID;
-                tk->i_offset = 0;
                 tk->i_pcr = VLC_TS_INVALID;
                 tk->f_npt = 0.;
-                tk->b_discontinuity = false;
-                tk->i_next_block_flags = BLOCK_FLAG_DISCONTINUITY;
+                tk->b_flushing_discontinuity = false;
+                tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
             }
-            es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pcr );
+            if( p_sys->i_pcr != VLC_TS_INVALID )
+            {
+                es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pcr );
+//                msg_Dbg( p_demux, "Current p_sys->i_pcr2 = %lld",p_sys->i_pcr );
+            }
         }
         else if( p_sys->i_pcr == VLC_TS_INVALID ||
-                 i_minpcr > p_sys->i_pcr + CLOCK_FREQ / 4 )
+                 i_minpcr > p_sys->i_pcr + CLOCK_FREQ / 4 ) // will update clock normally per 250ms
         {
             p_sys->i_pcr = i_minpcr;
-            es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pcr );
+            if( p_sys->i_pcr != VLC_TS_INVALID ){
+                es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pcr );
+//                msg_Dbg( p_demux, "Current p_sys->i_pcr3 = %lld",p_sys->i_pcr );
+                }
         }
     }
 
@@ -1442,7 +1451,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
     switch( i_query )
     {
         case DEMUX_GET_TIME:
-            pi64 = (int64_t*)va_arg( args, int64_t * );
+            pi64 = va_arg( args, int64_t * );
             if( p_sys->f_npt > 0 )
             {
                 *pi64 = (int64_t)(p_sys->f_npt * 1000000.);
@@ -1451,7 +1460,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_LENGTH:
-            pi64 = (int64_t*)va_arg( args, int64_t * );
+            pi64 = va_arg( args, int64_t * );
             if( p_sys->f_npt_length > 0 )
             {
                 double d_length = p_sys->f_npt_length * 1000000.0;
@@ -1464,7 +1473,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_POSITION:
-            pf = (double*)va_arg( args, double* );
+            pf = va_arg( args, double * );
             if( (p_sys->f_npt_length > 0) && (p_sys->f_npt > 0) )
             {
                 *pf = p_sys->f_npt / p_sys->f_npt_length;
@@ -1480,14 +1489,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
                 if( (i_query == DEMUX_SET_TIME) && (p_sys->f_npt > 0) )
                 {
-                    i64 = (int64_t)va_arg( args, int64_t );
+                    i64 = va_arg( args, int64_t );
                     time = (float)(i64 / 1000000.0); /* in second */
                 }
                 else if( i_query == DEMUX_SET_TIME )
                     return VLC_EGENERIC;
                 else
                 {
-                    f = (double)va_arg( args, double );
+                    f = va_arg( args, double );
                     time = f * p_sys->f_npt_length;   /* in second */
                 }
 
@@ -1538,7 +1547,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         /* Special for access_demux */
         case DEMUX_CAN_PAUSE:
         case DEMUX_CAN_SEEK:
-            pb = (bool*)va_arg( args, bool * );
+            pb = va_arg( args, bool * );
             if( p_sys->rtsp && p_sys->f_npt_length > 0 )
                 /* Not always true, but will be handled in SET_PAUSE_STATE */
                 *pb = true;
@@ -1547,7 +1556,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_CAN_CONTROL_PACE:
-            pb = (bool*)va_arg( args, bool * );
+            pb = va_arg( args, bool * );
 
 #if 1       /* Disable for now until we have a clock synchro algo
              * which works with something else than MPEG over UDP */
@@ -1558,7 +1567,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_CAN_CONTROL_RATE:
-            pb = (bool*)va_arg( args, bool * );
+            pb = va_arg( args, bool * );
 
             *pb = (p_sys->rtsp != NULL) &&
                     (p_sys->f_npt_length > 0) &&
@@ -1590,7 +1599,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
              * Scale < 0 value indicates rewind
              */
 
-            pi_int = (int*)va_arg( args, int * );
+            pi_int = va_arg( args, int * );
             f_scale = (double)INPUT_RATE_DEFAULT / (*pi_int);
             f_old_scale = p_sys->ms->scale();
 
@@ -1651,7 +1660,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                 {
                     live_track_t *tk = p_sys->track[i];
                     tk->b_rtcp_sync = false;
-                    tk->b_discontinuity = false;
+                    tk->b_flushing_discontinuity = false;
+                    tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
                     tk->i_lastpts = VLC_TS_INVALID;
                     tk->i_pcr = VLC_TS_INVALID;
                 }
@@ -1679,7 +1689,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_EGENERIC;
 
         case DEMUX_GET_PTS_DELAY:
-            pi64 = (int64_t*)va_arg( args, int64_t * );
+            pi64 = va_arg( args, int64_t * );
             *pi64 = INT64_C(1000)
                   * var_InheritInteger( p_demux, "network-caching" );
             return VLC_SUCCESS;
@@ -1852,7 +1862,7 @@ static void StreamRead( void *p_private, unsigned int i_size,
     live_track_t   *tk = (live_track_t*)p_private;
     demux_t        *p_demux = tk->p_demux;
     demux_sys_t    *p_sys = p_demux->p_sys;
-    block_t        *p_block;
+    block_t        *p_block = NULL;
 
     //msg_Dbg( p_demux, "pts: %d", pts.tv_sec );
 
@@ -1983,9 +1993,6 @@ static void StreamRead( void *p_private, unsigned int i_size,
         {
             memcpy( p_block->p_buffer, &header, 4 );
             memcpy( p_block->p_buffer + 4, tk->p_buffer, i_size );
-
-            if( tk->sub->rtpSource()->curPacketMarkerBit() )
-                p_block->i_flags |= BLOCK_FLAG_END_OF_FRAME;
         }
     }
     else if( tk->fmt.i_codec == VLC_CODEC_H264 || tk->fmt.i_codec == VLC_CODEC_HEVC )
@@ -1995,15 +2002,33 @@ static void StreamRead( void *p_private, unsigned int i_size,
         else if( tk->fmt.i_codec == VLC_CODEC_HEVC && ((tk->p_buffer[0] & 0x7e)>>1) >= 48 )
             msg_Warn( p_demux, "unsupported NAL type for H265" );
 
-        /* Normal NAL type */
-        if( (p_block = block_Alloc( i_size + 4 )) )
+
+        if(tk->fmt.i_codec == VLC_CODEC_H264 )// check i frame for h264
         {
-            p_block->p_buffer[0] = 0x00;
-            p_block->p_buffer[1] = 0x00;
-            p_block->p_buffer[2] = 0x00;
-            p_block->p_buffer[3] = 0x01;
-            memcpy( &p_block->p_buffer[4], tk->p_buffer, i_size );
+            if(5 == (tk->p_buffer[0] & 0x1f))
+               tk->i_IFrameCount++;
+            //msg_Dbg( p_demux, "h264 Current NAL type is %d",tk->p_buffer[0] & 0x1f );
         }
+        else // check i frame for h265
+        {
+            if(19 == (tk->p_buffer[0] & 0x7e)>>1)
+                tk->i_IFrameCount++;
+            //msg_Dbg( p_demux, "h265 Current NAL type is %d",(tk->p_buffer[0] & 0x7e)>>1 );
+        }
+
+        /* Normal NAL type */
+       if(tk->i_IFrameCount > 0) /* check first i frame arrived*/
+       {
+           if(p_block = block_Alloc( i_size + 4 ))
+           {
+               p_block->p_buffer[0] = 0x00;
+               p_block->p_buffer[1] = 0x00;
+               p_block->p_buffer[2] = 0x00;
+               p_block->p_buffer[3] = 0x01;
+               memcpy( &p_block->p_buffer[4], tk->p_buffer, i_size );
+           }
+       }
+
     }
     else if( tk->format == live_track_t::ASF_STREAM )
     {
@@ -2023,18 +2048,14 @@ static void StreamRead( void *p_private, unsigned int i_size,
     {
         msg_Dbg( p_demux, "tk->rtpSource->hasBeenSynchronizedUsingRTCP()" );
         p_sys->b_rtcp_sync = tk->b_rtcp_sync = true;
-        if( tk->i_pcr < i_pts )
+        if( tk->i_pcr != VLC_TS_INVALID )
         {
-            tk->i_offset = (tk->i_pcr > 0) ? i_pts + tk->i_pcr : 0;
-        }
-        else
-        {
-            tk->b_discontinuity = ( tk->i_pcr > VLC_TS_INVALID );
-            tk->i_pcr = VLC_TS_INVALID;
+            tk->i_next_block_flags |= BLOCK_FLAG_DISCONTINUITY;
+            const int64_t i_max_diff = CLOCK_FREQ * (( tk->fmt.i_cat == SPU_ES ) ? 60 : 1);
+            tk->b_flushing_discontinuity = (llabs(i_pts - tk->i_pcr) > i_max_diff);
+            tk->i_pcr = i_pts;
         }
     }
-
-    i_pts -= tk->i_offset;
 
     /* Update our global npt value */
     if( tk->f_npt > 0 &&
@@ -2052,10 +2073,30 @@ static void StreamRead( void *p_private, unsigned int i_size,
                 vlc_demux_chained_Send( tk->p_out_muxed, p_block );
                 break;
             default:
-                if( i_pts != tk->i_lastpts )
+               // Disable this code, the pts may be the same value like the last packet.
+               // The default value is zero, the pts is invalid for display, will be droped
+               // if( i_pts != tk->i_lastpts ) 
                     p_block->i_pts = VLC_TS_0 + i_pts;
                 /*FIXME: for h264 you should check that packetization-mode=1 in sdp-file */
-                p_block->i_dts = ( tk->fmt.i_codec == VLC_CODEC_MPGV ) ? VLC_TS_INVALID : (VLC_TS_0 + i_pts);
+                msg_Dbg( p_demux, "Current i_codec is %d",tk->fmt.i_codec);
+                switch( tk->fmt.i_codec )
+                {
+                    case VLC_CODEC_MPGV:
+                    case VLC_CODEC_H264:
+                    case VLC_CODEC_HEVC:
+                    case VLC_CODEC_VP8:
+                        //msg_Dbg( p_demux, "Current i_dts is VLC_TS_INVALID");
+                        p_block->i_dts = VLC_TS_INVALID;
+                        break;
+                    default:
+                        //msg_Dbg( p_demux, "Current path is default");
+                        p_block->i_dts = VLC_TS_0 + i_pts;
+                        break;
+                }
+
+                if( i_truncated_bytes )
+                    p_block->i_flags |= BLOCK_FLAG_CORRUPTED;
+
                 if( unlikely(tk->i_next_block_flags) )
                 {
                     p_block->i_flags |= tk->i_next_block_flags;
@@ -2068,6 +2109,7 @@ static void StreamRead( void *p_private, unsigned int i_size,
                         tk->i_pcr = i_pts;
                     tk->i_lastpts = i_pts;
                 }
+                //msg_Dbg( p_demux, "Current pts is %lld",i_pts);
                 break;
         }
     }
