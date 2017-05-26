@@ -434,6 +434,8 @@ void input_ConfigVarInit ( input_thread_t *p_input )
     if( !input_priv(p_input)->b_preparsing )
     {
         var_Create( p_input, "video", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
+        var_SetBool( p_input, "video", true );
+
         var_Create( p_input, "audio", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
         var_Create( p_input, "spu", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
 
