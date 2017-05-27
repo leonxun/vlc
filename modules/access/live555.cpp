@@ -2078,7 +2078,7 @@ static void StreamRead( void *p_private, unsigned int i_size,
                // if( i_pts != tk->i_lastpts ) 
                     p_block->i_pts = VLC_TS_0 + i_pts;
                 /*FIXME: for h264 you should check that packetization-mode=1 in sdp-file */
-                msg_Dbg( p_demux, "Current i_codec is %d",tk->fmt.i_codec);
+                // msg_Dbg( p_demux, "Current i_codec is %d",tk->fmt.i_codec);
                 switch( tk->fmt.i_codec )
                 {
                     case VLC_CODEC_MPGV:
