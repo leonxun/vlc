@@ -2329,6 +2329,9 @@ static demux_t *InputDemuxNew( input_thread_t *p_input, input_source_t *p_source
 
         return p_demux;
     }
+    // return p_demux with value null always, rtsp source will be opened again by player 
+    else
+        return p_demux;
 
     /* not an access-demux: create the underlying access stream */
     char *psz_base_mrl;
