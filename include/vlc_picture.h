@@ -92,6 +92,7 @@ struct picture_t
      * keep track of the picture */
     picture_sys_t * p_sys;
 
+    mtime_t         stream_date;                           /**< display date */
     /** Next picture in a FIFO a pictures */
     struct picture_t *p_next;
 };
