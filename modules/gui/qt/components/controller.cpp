@@ -49,6 +49,9 @@
 #include <QRegion>
 #include <QSignalMapper>
 #include <QTimer>
+#include <QApplication>
+#include <QWindow>
+#include <QScreen>
 
 //#define DEBUG_LAYOUT 1
 
@@ -207,7 +210,7 @@ void AbstractController::createAndAddWidget( QBoxLayout *controlLayout_,
     a_button->setIcon( QIcon( iconL[button] ) );
 #define BUTTON_SET_BAR2( button, image, tooltip ) \
     button->setToolTip( tooltip );          \
-    button->setIcon( QIcon( ":/"#image ) );
+    button->setIcon( QIcon( ":/"#image ".svg" ) );
 
 #define ENABLE_ON_VIDEO( a ) \
     CONNECT( THEMIM->getIM(), voutChanged( bool ), a, setEnabled( bool ) ); \
@@ -347,7 +350,7 @@ QWidget *AbstractController::createWidget( buttonType_e button, int options )
         }
         break;
     case INPUT_SLIDER: {
-        SeekSlider *slider = new SeekSlider( Qt::Horizontal, NULL, !b_shiny );
+        SeekSlider *slider = new SeekSlider( p_intf, Qt::Horizontal, NULL, !b_shiny );
         SeekPoints *chapters = new SeekPoints( this, p_intf );
         CONNECT( THEMIM->getIM(), chapterChanged( bool ), chapters, update() );
         slider->setChapters( chapters );
@@ -614,7 +617,7 @@ QFrame *AbstractController::telexFrame()
     QToolButton *telexTransparent = new QToolButton;
     setupButton( telexTransparent );
     BUTTON_SET_BAR2( telexTransparent, toolbar/tvtelx,
-                     qtr( "Toggle Transparency " ) );
+                     qtr( "Toggle Transparency" ) );
     telexTransparent->setEnabled( false );
     telexTransparent->setCheckable( true );
     telexLayout->addWidget( telexTransparent );
@@ -641,7 +644,14 @@ QFrame *AbstractController::telexFrame()
     QSignalMapper *contextButtonMapper = new QSignalMapper( this );
     QToolButton *contextButton = NULL;
     int i_iconminsize = __MAX( 16, telexOn->minimumHeight() );
+
+#if HAS_QT56
+    qreal f_ratio = QApplication::primaryScreen()->devicePixelRatio();
+    QPixmap iconPixmap( i_iconminsize * f_ratio, i_iconminsize * f_ratio );
+#else
     QPixmap iconPixmap( i_iconminsize, i_iconminsize );
+#endif
+
     iconPixmap.fill( Qt::transparent );
     QPainter iconPixmapPainter( &iconPixmap );
     QLinearGradient iconPixmapPainterGradient( iconPixmap.rect().center() / 2,
@@ -783,13 +793,15 @@ FullscreenControllerWidget::FullscreenControllerWidget( intf_thread_t *_p_i, QWi
     b_mouse_over        = false;
     i_mouse_last_move_x = -1;
     i_mouse_last_move_y = -1;
-#if HAVE_TRANSPARENCY
     b_slow_hide_begin   = false;
     i_slow_hide_timeout = 1;
-#endif
     b_fullscreen        = false;
     i_hide_timeout      = 1;
     i_screennumber      = -1;
+#ifdef QT5_HAS_WAYLAND
+    b_hasWayland = QGuiApplication::platformName()
+           .startsWith(QLatin1String("wayland"), Qt::CaseInsensitive);
+#endif
 
     vout.clear();
 
@@ -819,11 +831,9 @@ FullscreenControllerWidget::FullscreenControllerWidget( intf_thread_t *_p_i, QWi
     CONNECT( p_hideTimer, timeout(), this, hideFSC() );
 
     /* slow hiding timer */
-#if HAVE_TRANSPARENCY
     p_slowHideTimer = new QTimer( this );
     CONNECT( p_slowHideTimer, timeout(), this, slowHideFSC() );
     f_opacity = var_InheritFloat( p_intf, "qt-fs-opacity" );
-#endif
 
     i_sensitivity = var_InheritInteger( p_intf, "qt-fs-sensitivity" );
 
@@ -836,7 +846,6 @@ FullscreenControllerWidget::FullscreenControllerWidget( intf_thread_t *_p_i, QWi
     previousPosition = getSettings()->value( "FullScreen/pos" ).toPoint();
     screenRes = getSettings()->value( "FullScreen/screen" ).toRect();
     isWideFSC = getSettings()->value( "FullScreen/wide" ).toBool();
-    i_screennumber = var_InheritInteger( p_intf, "qt-fullscreen-screennumber" );
 
     CONNECT( this, fullscreenChanged( bool ), THEMIM, changeFullscreen( bool ) );
 }
@@ -859,10 +868,23 @@ void FullscreenControllerWidget::restoreFSC()
         setMinimumWidth( FSC_WIDTH );
         adjustSize();
 
+        if ( targetScreen() < 0 )
+            return;
+
         QRect currentRes = QApplication::desktop()->screenGeometry( targetScreen() );
+        QWindow *wh = windowHandle();
+        if ( wh != Q_NULLPTR )
+        {
+#ifdef QT5_HAS_WAYLAND
+            if ( !b_hasWayland )
+                wh->setScreen(QGuiApplication::screens()[targetScreen()]);
+#else
+            wh->setScreen(QGuiApplication::screens()[targetScreen()]);
+#endif
+        }
 
         if( currentRes == screenRes &&
-            QApplication::desktop()->screen()->geometry().contains( previousPosition, true ) )
+            currentRes.contains( previousPosition, true ) )
         {
             /* Restore to the last known position */
             move( previousPosition );
@@ -900,9 +922,7 @@ void FullscreenControllerWidget::showFSC()
 {
     restoreFSC();
 
-#if HAVE_TRANSPARENCY
     setWindowOpacity( f_opacity );
-#endif
 
     show();
 }
@@ -918,11 +938,9 @@ void FullscreenControllerWidget::planHideFSC()
 
     p_hideTimer->start( i_timeout );
 
-#if HAVE_TRANSPARENCY
     b_slow_hide_begin = true;
     i_slow_hide_timeout = i_timeout;
     p_slowHideTimer->start( i_slow_hide_timeout / 2 );
-#endif
 }
 
 /**
@@ -932,7 +950,6 @@ void FullscreenControllerWidget::planHideFSC()
  */
 void FullscreenControllerWidget::slowHideFSC()
 {
-#if HAVE_TRANSPARENCY
     if( b_slow_hide_begin )
     {
         b_slow_hide_begin = false;
@@ -954,7 +971,6 @@ void FullscreenControllerWidget::slowHideFSC()
          if ( windowOpacity() <= 0.0 )
              p_slowHideTimer->stop();
     }
-#endif
 }
 
 void FullscreenControllerWidget::updateFullwidthGeometry( int number )
@@ -973,9 +989,16 @@ void FullscreenControllerWidget::toggleFullwidth()
     restoreFSC();
 }
 
+
+void FullscreenControllerWidget::setTargetScreen(int screennumber)
+{
+    i_screennumber = screennumber;
+}
+
+
 int FullscreenControllerWidget::targetScreen()
 {
-    if( i_screennumber < 0 || i_screennumber > QApplication::desktop()->numScreens() )
+    if( i_screennumber < 0 || i_screennumber >= QApplication::desktop()->screenCount() )
         return QApplication::desktop()->screenNumber( p_intf->p_sys->p_mi );
     return i_screennumber;
 }
@@ -1013,7 +1036,7 @@ void FullscreenControllerWidget::customEvent( QEvent *event )
             b_fs = b_fullscreen;
             vlc_mutex_unlock( &lock );
 
-            if( b_fs )
+            if( b_fs && ( isHidden() || p_slowHideTimer->isActive() ) )
                 showFSC();
 
             break;
@@ -1083,10 +1106,8 @@ void FullscreenControllerWidget::enterEvent( QEvent *event )
     b_mouse_over = true;
 
     p_hideTimer->stop();
-#if HAVE_TRANSPARENCY
     p_slowHideTimer->stop();
     setWindowOpacity( f_opacity );
-#endif
     event->accept();
 }
 

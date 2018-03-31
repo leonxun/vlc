@@ -1,8 +1,5 @@
 access_vaDirectoryControlHelper
 vlc_access_NewMRL
-access_fsdir_init
-access_fsdir_finish
-access_fsdir_additem
 AddMD5
 aout_BitsPerSample
 aout_ChannelExtract
@@ -17,12 +14,14 @@ aout_FormatPrint
 aout_FormatPrintChannels
 aout_VolumeGet
 aout_VolumeSet
+aout_VolumeUpdate
 aout_MuteSet
 aout_MuteGet
 aout_DeviceGet
 aout_DeviceSet
 aout_DevicesList
 aout_FiltersNew
+aout_FiltersChangeViewpoint
 aout_FiltersDelete
 aout_FiltersDrain
 aout_FiltersFlush
@@ -52,9 +51,8 @@ config_ChainParse
 config_ChainParseOptions
 config_ExistIntf
 config_FindConfig
-config_GetDataDir
-config_GetLibDir
 config_GetFloat
+config_GetSysPath
 config_GetUserDir
 config_GetInt
 config_GetIntChoices
@@ -82,16 +80,6 @@ decoder_GetDisplayRate
 decoder_GetInputAttachments
 decoder_NewAudioBuffer
 decoder_NewSubpicture
-decoder_SynchroChoose
-decoder_SynchroDate
-decoder_SynchroDecode
-decoder_SynchroEnd
-decoder_SynchroInit
-decoder_SynchroNewPicture
-decoder_SynchroRelease
-decoder_SynchroReset
-decoder_SynchroTrash
-demux_Delete
 demux_PacketizerDestroy
 demux_PacketizerNew
 demux_New
@@ -107,6 +95,8 @@ es_format_Copy
 es_format_Init
 es_format_InitFromVideo
 es_format_IsSimilar
+filter_AddProxyCallbacks
+filter_DelProxyCallbacks
 filter_Blend
 filter_chain_AppendConverter
 filter_chain_AppendFilter
@@ -114,7 +104,7 @@ filter_chain_AppendFromString
 filter_chain_Delete
 filter_chain_DeleteFilter
 filter_chain_GetFmtOut
-filter_chain_GetLength
+filter_chain_IsEmpty
 filter_chain_MouseFilter
 filter_chain_MouseEvent
 filter_chain_NewVideo
@@ -201,8 +191,6 @@ input_item_node_AppendItem
 input_item_node_AppendNode
 input_item_node_Create
 input_item_node_Delete
-input_item_node_PostAndDelete
-input_item_PostSubItem
 input_item_ReplaceInfos
 input_item_SetDuration
 input_item_SetMeta
@@ -224,6 +212,9 @@ input_resource_ResetAout
 input_Start
 input_Stop
 input_vaControl
+vlc_readdir_helper_init
+vlc_readdir_helper_finish
+vlc_readdir_helper_additem
 input_Close
 intf_Create
 libvlc_InternalAddIntf
@@ -242,6 +233,7 @@ libvlc_MetadataRequest
 libvlc_MetadataCancel
 libvlc_ArtRequest
 vlc_UrlParse
+vlc_UrlParseFixup
 vlc_UrlClean
 vlc_path2uri
 vlc_uri2path
@@ -282,6 +274,9 @@ vlc_LogSet
 vlc_vaLog
 vlc_strerror
 vlc_strerror_c
+vlc_obj_malloc
+vlc_obj_calloc
+vlc_obj_free
 msleep
 mwait
 net_Accept
@@ -299,10 +294,10 @@ net_vaPrintf
 net_Write
 NTPtime64
 picture_BlendSubpicture
+picture_Clone
 picture_CopyPixels
 picture_Hold
 picture_Release
-picture_IsReferenced
 picture_CopyProperties
 picture_Copy
 picture_Export
@@ -366,6 +361,7 @@ playlist_VolumeSet
 playlist_VolumeUp
 playlist_MuteSet
 playlist_MuteGet
+playlist_SetRenderer
 sdp_AddAttribute
 sdp_AddMedia
 secstotimestr
@@ -435,6 +431,9 @@ text_segment_NewInheritStyle
 text_segment_Delete
 text_segment_ChainDelete
 text_segment_Copy
+text_segment_FromRuby
+text_segment_ruby_New
+text_segment_ruby_ChainDelete
 vlc_tls_ClientCreate
 vlc_tls_ServerCreate
 vlc_tls_Delete
@@ -515,8 +514,9 @@ video_format_GetTransform
 video_format_IsSimilar
 video_format_Setup
 video_format_Print
-video_splitter_Delete
-video_splitter_New
+vlc_actions_get_id
+vlc_actions_get_key_names
+vlc_actions_get_keycodes
 vlc_b64_decode
 vlc_b64_decode_binary
 vlc_b64_decode_binary_to_buffer
@@ -568,6 +568,7 @@ vlc_CPU
 vlc_error
 vlc_event_attach
 vlc_event_detach
+vlc_filenamecmp
 vlc_fourcc_GetCodec
 vlc_fourcc_GetCodecAudio
 vlc_fourcc_GetCodecFromString
@@ -577,7 +578,6 @@ vlc_fourcc_IsYUV
 vlc_fourcc_GetRGBFallback
 vlc_fourcc_GetYUVFallback
 vlc_fourcc_AreUVPlanesSwapped
-vlc_GetActionId
 vlc_getaddrinfo
 vlc_getaddrinfo_i11e
 vlc_getnameinfo
@@ -644,6 +644,7 @@ vlc_object_find_name
 vlc_object_hold
 vlc_object_release
 vlc_object_get_name
+vlc_once
 vlc_rand_bytes
 vlc_drand48
 vlc_lrand48
@@ -681,7 +682,6 @@ vlc_epg_Delete
 vlc_epg_Duplicate
 vlc_epg_AddEvent
 vlc_epg_SetCurrent
-vlc_epg_Merge
 vlc_fifo_Lock
 vlc_fifo_Unlock
 vlc_fifo_Signal
@@ -693,7 +693,8 @@ vlc_fifo_DequeueAllUnlocked
 vlc_fifo_GetCount
 vlc_fifo_GetBytes
 vlc_gl_Create
-vlc_gl_Destroy
+vlc_gl_Release
+vlc_gl_Hold
 vlc_gl_surface_Create
 vlc_gl_surface_CheckSize
 vlc_gl_surface_Destroy

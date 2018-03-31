@@ -32,10 +32,16 @@ struct hxxx_helper_nal
 {
     block_t *b;
     union {
+        void                            *xps;
         h264_sequence_parameter_set_t   *h264_sps;
         h264_picture_parameter_set_t    *h264_pps;
+        hevc_sequence_parameter_set_t   *hevc_sps;
+        hevc_picture_parameter_set_t    *hevc_pps;
+        hevc_video_parameter_set_t      *hevc_vps;
     };
 };
+
+#define HXXX_HELPER_SEI_COUNT 16
 
 struct hxxx_helper
 {
@@ -54,9 +60,17 @@ struct hxxx_helper
             uint8_t i_pps_count;
         } h264;
         struct {
-            /* TODO: handle VPS/SPS/PPS */
-            void *p_annexb_config_nal;
-            size_t i_annexb_config_nal;
+            struct hxxx_helper_nal sps_list[HEVC_SPS_ID_MAX + 1];
+            struct hxxx_helper_nal pps_list[HEVC_PPS_ID_MAX + 1];
+            struct hxxx_helper_nal vps_list[HEVC_VPS_ID_MAX + 1];
+            struct hxxx_helper_nal sei_list[HXXX_HELPER_SEI_COUNT];
+            uint8_t i_current_sps;
+            uint8_t i_current_vps;
+            uint8_t i_sps_count;
+            uint8_t i_pps_count;
+            uint8_t i_vps_count;
+            uint8_t i_sei_count;
+            uint8_t i_previous_nal_type;
         } hevc;
     };
 
@@ -74,15 +88,30 @@ void hxxx_helper_clean(struct hxxx_helper *hh);
 int hxxx_helper_set_extra(struct hxxx_helper *hh, const void *p_extra,
                           size_t i_extra);
 
-block_t *h264_helper_get_annexb_config(struct hxxx_helper *hh);
+block_t *h264_helper_get_annexb_config(const struct hxxx_helper *hh);
+block_t *hevc_helper_get_annexb_config(const struct hxxx_helper *hh);
 
-block_t *h264_helper_get_avcc_config(struct hxxx_helper *hh);
+block_t *h264_helper_get_avcc_config(const struct hxxx_helper *hh);
+block_t *hevc_helper_get_hvcc_config(const struct hxxx_helper *hh);
 
-int h264_helper_get_current_picture_size(struct hxxx_helper *hh,
+int hxxx_helper_get_current_picture_size(const struct hxxx_helper *hh,
                                          unsigned *p_w, unsigned *p_h,
                                          unsigned *p_vw, unsigned *p_vh);
 
-int h264_helper_get_current_sar(struct hxxx_helper *hh, int *p_num, int *p_den);
+int hxxx_helper_get_current_sar(const struct hxxx_helper *hh, int *p_num, int *p_den);
 
-int h264_helper_get_current_dpb_values(struct hxxx_helper *hh,
+int h264_helper_get_current_dpb_values(const struct hxxx_helper *hh,
                                        uint8_t *p_depth, unsigned *pi_delay);
+
+int hxxx_helper_get_current_profile_level(const struct hxxx_helper *hh,
+                                          uint8_t *p_profile, uint8_t *p_level);
+
+int
+hxxx_helper_get_chroma_chroma(const struct hxxx_helper *hh, uint8_t *pi_chroma_format,
+                              uint8_t *pi_depth_luma, uint8_t *pi_depth_chroma);
+
+int hxxx_helper_get_colorimetry(const struct hxxx_helper *hh,
+                                video_color_primaries_t *p_primaries,
+                                video_transfer_func_t *p_transfer,
+                                video_color_space_t *p_colorspace,
+                                bool *p_full_range);

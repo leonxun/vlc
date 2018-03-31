@@ -156,15 +156,16 @@ private:
 class matroska_segment_c;
 struct matroska_stream_c
 {
-    matroska_stream_c() :p_io_callback(NULL) ,p_estream(NULL) {}
+    matroska_stream_c(stream_t *s, bool owner);
     ~matroska_stream_c()
     {
-        delete p_io_callback;
-        delete p_estream;
+        delete io_callback;
     }
 
-    IOCallback         *p_io_callback;
-    EbmlStream         *p_estream;
+    bool isUsed() const;
+
+    IOCallback         * io_callback;
+    EbmlStream         estream;
 
     std::vector<matroska_segment_c*> segments;
 };
@@ -183,6 +184,9 @@ public:
 class mkv_track_t
 {
     public:
+        mkv_track_t(enum es_format_category_e es_cat);
+        ~mkv_track_t();
+
         typedef unsigned int track_id_t;
 
         bool         b_default;
@@ -201,7 +205,7 @@ class mkv_track_t
         uint64_t     i_default_duration;
         float        f_timecodescale;
         mtime_t      i_last_dts;
-        uint64_t     i_skip_until_fpos;
+        uint64_t     i_skip_until_fpos; /*< any block before this fpos should be ignored */
 
         /* video */
         es_format_t fmt;
@@ -217,11 +221,7 @@ class mkv_track_t
         /* Private track paramters */
         PrivateTrackData *p_sys;
 
-        bool            b_inited;
         bool            b_discontinuity;
-        /* data to be send first */
-        int             i_data_init;
-        uint8_t         *p_data_init;
 
         /* informative */
         std::string str_codec_name;

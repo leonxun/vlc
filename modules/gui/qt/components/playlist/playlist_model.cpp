@@ -41,6 +41,7 @@
 #include <assert.h>
 #include <QFont>
 #include <QAction>
+#include <QStack>
 
 /*************************************************************************
  * Playlist model implementation
@@ -346,7 +347,10 @@ QVariant PLModel::data( const QModelIndex &index, const int role ) const
                 {
                     PLItem *item = getItem( index );
                     /* Used to segfault here because i_type wasn't always initialized */
-                    return QVariant( icons[item->inputItem()->i_type] );
+                    int idx = item->inputItem()->i_type;
+                    if( item->inputItem()->b_net && item->inputItem()->i_type == ITEM_TYPE_FILE )
+                        idx = ITEM_TYPE_STREAM;
+                    return QVariant( icons[idx] );
                 }
                 case COLUMN_COVER:
                     /* !warn: changes tree item line height. Otherwise, override
@@ -515,20 +519,31 @@ PLItem *PLModel::findByPLId( PLItem *root, int i_id ) const
     if( root->id() == i_id )
         return root;
 
-    QList<AbstractPLItem *>::iterator it = root->children.begin();
-    while ( it != root->children.end() )
+    /* traverse the tree (in depth first) iteratively to avoid stack overflow */
+
+    struct RemainingChildren {
+        QList<AbstractPLItem *>::const_iterator next;
+        QList<AbstractPLItem *>::const_iterator end;
+    };
+
+    QStack<RemainingChildren> stack;
+    if( root->childCount() )
+        stack.push( {root->children.cbegin(), root->children.cend()} );
+
+    while ( !stack.isEmpty() )
     {
-        PLItem *item = static_cast<PLItem *>(*it);
+        RemainingChildren &remainingChildren = stack.top();
+
+        PLItem *item = static_cast<PLItem *>( *remainingChildren.next );
         if( item->id() == i_id )
             return item;
 
+        if( ++remainingChildren.next == remainingChildren.end )
+            /* there are no more children at this depth level */
+            stack.pop();
+
         if( item->childCount() )
-        {
-            PLItem *childFound = findByPLId( item, i_id );
-            if( childFound )
-                return childFound;
-        }
-        ++it;
+            stack.push( {item->children.cbegin(), item->children.cend()} );
     }
     return NULL;
 }

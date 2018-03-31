@@ -179,7 +179,8 @@ static int Open ( vlc_object_t *p_this )
         }
     }
 
-    if( asprintf( &psz_vobname, "%s://%s", p_demux->psz_access, p_demux->psz_location ) == -1 )
+    psz_vobname = strdup( p_demux->psz_url );
+    if( psz_vobname == NULL )
         goto error;
 
     i_len = strlen( psz_vobname );
@@ -328,6 +329,11 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         case DEMUX_SET_NEXT_DEMUX_TIME:
             p_sys->i_next_demux_date = va_arg( args, int64_t );
             return VLC_SUCCESS;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+            return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
 
         case DEMUX_GET_PTS_DELAY:
         case DEMUX_GET_FPS:
@@ -482,7 +488,6 @@ static int ParseVobSubIDX( demux_t *p_demux )
     demux_sys_t *p_sys = p_demux->p_sys;
     text_t      *txt = &p_sys->txt;
     char        *line;
-    vobsub_track_t *current_tk = NULL;
 
     for( ;; )
     {
@@ -544,7 +549,7 @@ static int ParseVobSubIDX( demux_t *p_demux )
                     sizeof( vobsub_track_t ) * (p_sys->i_tracks + 1 ) );
 
             /* Init the track */
-            current_tk = &p_sys->track[p_sys->i_tracks - 1];
+            vobsub_track_t *current_tk = &p_sys->track[p_sys->i_tracks - 1];
             memset( current_tk, 0, sizeof( vobsub_track_t ) );
             current_tk->i_current_subtitle = 0;
             current_tk->i_subtitles = 0;
@@ -558,7 +563,7 @@ static int ParseVobSubIDX( demux_t *p_demux )
             fmt.psz_language = language;
             if( p_sys->b_palette )
             {
-                fmt.subs.spu.palette[0] = 0xBeef;
+                fmt.subs.spu.palette[0] = SPU_PALETTE_DEFINED;
                 memcpy( &fmt.subs.spu.palette[1], p_sys->palette, 16 * sizeof( uint32_t ) );
             }
 

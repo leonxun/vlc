@@ -51,78 +51,6 @@
 
 
 /*****************************************************************************
- * MPSlider
- *****************************************************************************/
-
-@interface MPSlider : NSSlider
-
-@end
-
-/*****************************************************************************
- * ProgressView
- *****************************************************************************/
-
-@interface VLCProgressView : NSView
-
-- (void)scrollWheel:(NSEvent *)o_event;
-
-@end
-
-
-/*****************************************************************************
- * TimeLineSlider
- *****************************************************************************/
-
-@interface TimeLineSlider : NSSlider
-
-@property (readonly) CGFloat knobPosition;
-
-- (void)drawRect:(NSRect)rect;
-- (void)drawKnobInRect:(NSRect)knobRect;
-
-@end
-
-/*****************************************************************************
- * VLCVolumeSliderCommon
- *****************************************************************************/
-
-@interface VLCVolumeSliderCommon : NSSlider
-
-@property (readwrite, nonatomic) BOOL usesBrightArtwork;
-
-- (void)scrollWheel:(NSEvent *)o_event;
-- (void)drawFullVolumeMarker;
-
-- (CGFloat)fullVolumePos;
-
-@end
-
-@interface VolumeSliderCell : NSSliderCell
-@end
-
-/*****************************************************************************
- * ITSlider
- *****************************************************************************/
-
-@interface ITSlider : VLCVolumeSliderCommon
-
-@end
-
-/*****************************************************************************
- * VLCTimeField interface
- *****************************************************************************
- * we need the implementation to catch our click-event in the controller window
- *****************************************************************************/
-
-@interface VLCTimeField : NSTextField
-
-@property (readonly) BOOL timeRemaining;
-
-- (void)setRemainingIdentifier:(NSString *)o_string;
-
-@end
-
-/*****************************************************************************
  * VLCMainWindowSplitView interface
  *****************************************************************************/
 @interface VLCMainWindowSplitView : NSSplitView
@@ -187,10 +115,4 @@ typedef NSInteger NSByteCountFormatterCountStyle;
 }
 
 + (NSString *)stringFromByteCount:(long long)byteCount countStyle:(NSByteCountFormatterCountStyle)countStyle;
-@end
-
-extern NSString *const VLCOpenTextFieldWasClicked;
-
-@interface VLCOpenTextField : NSTextField
-- (void)mouseDown:(NSEvent *)theEvent;
 @end

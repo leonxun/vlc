@@ -101,12 +101,12 @@ static int getBallColor( vlc_object_t *p_this, char const *psz_newval );
 #define EDGE_VISIBLE_LONGTEXT N_("Set edge visibility.")
 
 #define BALL_SPEED_TEXT N_("Ball speed")
-#define BALL_SPEED_LONGTEXT N_("Set ball speed, the displacement value \
-                                in number of pixels by frame.")
+#define BALL_SPEED_LONGTEXT N_("Set ball speed, the displacement value " \
+                               "in number of pixels by frame.")
 
 #define BALL_SIZE_TEXT N_("Ball size")
-#define BALL_SIZE_LONGTEXT N_("Set ball size giving its radius in number \
-                                of pixels")
+#define BALL_SIZE_LONGTEXT N_("Set ball size giving its radius in number " \
+                              "of pixels")
 
 #define GRAD_THRESH_TEXT N_("Gradient threshold")
 #define GRAD_THRESH_LONGTEXT N_("Set gradient threshold for edge computation.")
@@ -576,20 +576,20 @@ static void FilterBall( filter_t *p_filter, picture_t *p_inpic,
 
     if( !p_filter->p_sys->p_smooth )
         p_filter->p_sys->p_smooth =
-                (uint32_t *)malloc( i_numLines * i_numCols
-                                    * sizeof(uint32_t));
+                (uint32_t *)vlc_alloc( i_numLines * i_numCols,
+                                       sizeof(uint32_t));
     p_smooth = p_filter->p_sys->p_smooth;
 
     if( !p_filter->p_sys->p_grad_x )
         p_filter->p_sys->p_grad_x =
-                (int32_t *)malloc( i_numLines * i_numCols
-                                   * sizeof(int32_t));
+                (int32_t *)vlc_alloc( i_numLines * i_numCols,
+                                      sizeof(int32_t));
     p_grad_x = p_filter->p_sys->p_grad_x;
 
     if( !p_filter->p_sys->p_grad_y )
         p_filter->p_sys->p_grad_y =
-                (int32_t *)malloc( i_numLines * i_numCols
-                                   * sizeof(int32_t));
+                (int32_t *)vlc_alloc( i_numLines * i_numCols,
+                                      sizeof(int32_t));
     p_grad_y = p_filter->p_sys->p_grad_y;
 
     if( !p_smooth || !p_grad_x || !p_grad_y ) return;

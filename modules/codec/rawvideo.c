@@ -62,7 +62,7 @@ static void CloseCommon   ( vlc_object_t * );
  *****************************************************************************/
 vlc_module_begin ()
     set_description( N_("Pseudo raw video decoder") )
-    set_capability( "decoder", 50 )
+    set_capability( "video decoder", 50 )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_VCODEC )
     set_callbacks( OpenDecoder, CloseCommon )
@@ -102,8 +102,6 @@ static int OpenCommon( decoder_t *p_dec )
 
     es_format_Copy( &p_dec->fmt_out, &p_dec->fmt_in );
 
-    date_Init( &p_sys->pts, p_dec->fmt_out.video.i_frame_rate,
-               p_dec->fmt_out.video.i_frame_rate_base );
     if( p_dec->fmt_out.video.i_frame_rate == 0 ||
         p_dec->fmt_out.video.i_frame_rate_base == 0)
     {
@@ -112,6 +110,9 @@ static int OpenCommon( decoder_t *p_dec )
                   p_dec->fmt_out.video.i_frame_rate_base);
         date_Init( &p_sys->pts, 25, 1 );
     }
+    else
+        date_Init( &p_sys->pts, p_dec->fmt_out.video.i_frame_rate,
+                    p_dec->fmt_out.video.i_frame_rate_base );
 
     for( unsigned i = 0; i < dsc->plane_count; i++ )
     {

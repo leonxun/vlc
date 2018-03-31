@@ -37,7 +37,7 @@
 /**
  The delegate that is called when a \c VLCRendererItem is added or deleted
  */
-@property (weak) id<VLCRendererDiscoveryDelegate> delegate;
+@property (assign) id<VLCRendererDiscoveryDelegate> delegate;
 
 /**
  The name of the renderer discovery module
@@ -52,11 +52,8 @@
 /**
  Array of \c VLCRendererItems that the module discovered
  */
-#ifdef MAC_OS_X_VERSION_10_11
 @property (readonly) NSMutableArray<VLCRendererItem*> *rendererItems;
-#else
-@property (readonly) NSMutableArray *rendererItems;
-#endif
+
 
 /**
  Indicates if the discovery has been started

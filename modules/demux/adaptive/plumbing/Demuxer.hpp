@@ -26,6 +26,8 @@
 namespace adaptive
 {
     class AbstractSourceStream;
+    class DemuxerFactoryInterface;
+    class StreamFormat;
 
     class AbstractDemuxer
     {
@@ -39,12 +41,34 @@ namespace adaptive
             bool alwaysStartsFromZero() const;
             bool needsRestartOnSeek() const;
             bool needsRestartOnSwitch() const;
+            bool needsRestartOnEachSegment() const;
             void setCanDetectSwitches(bool);
+            void setRestartsOnEachSegment(bool);
 
         protected:
             bool b_startsfromzero;
             bool b_reinitsonseek;
+            bool b_alwaysrestarts;
             bool b_candetectswitches;
+    };
+
+    class MimeDemuxer : public AbstractDemuxer
+    {
+        public:
+            MimeDemuxer(demux_t *, const DemuxerFactoryInterface *,
+                        es_out_t *, AbstractSourceStream *);
+            virtual ~MimeDemuxer();
+            virtual int demux(mtime_t); /* impl */
+            virtual void drain(); /* impl */
+            virtual bool create(); /* impl */
+            virtual void destroy(); /* impl */
+
+        protected:
+            AbstractSourceStream *sourcestream;
+            demux_t *p_realdemux;
+            AbstractDemuxer *demuxer;
+            const DemuxerFactoryInterface *factory;
+            es_out_t *p_es_out;
     };
 
     class Demuxer : public AbstractDemuxer
@@ -78,6 +102,12 @@ namespace adaptive
             mtime_t length;
     };
 
+    class DemuxerFactoryInterface
+    {
+        public:
+            virtual AbstractDemuxer * newDemux(demux_t *, const StreamFormat &,
+                                               es_out_t *, AbstractSourceStream *) const = 0;
+    };
 }
 
 #endif // DEMUXER_HPP

@@ -87,7 +87,6 @@
     NSMutableDictionary *registrationDictionary;
     id lastNotification;
     bool isInForeground;
-    bool hasNativeNotifications;
     intf_thread_t *interfaceThread;
 }
 
@@ -256,11 +255,6 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
     // Start in background
     isInForeground = NO;
 
-    // Check for native notification support
-    Class userNotificationClass = NSClassFromString(@"NSUserNotification");
-    Class userNotificationCenterClass = NSClassFromString(@"NSUserNotificationCenter");
-    hasNativeNotifications = (userNotificationClass && userNotificationCenterClass) ? YES : NO;
-
     lastNotification = nil;
     applicationName = nil;
     notificationType = nil;
@@ -272,17 +266,15 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
 
 - (void)dealloc
 {
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
     // Clear the remaining lastNotification in Notification Center, if any
     @autoreleasepool {
-        if (lastNotification && hasNativeNotifications) {
+        if (lastNotification) {
             [NSUserNotificationCenter.defaultUserNotificationCenter
              removeDeliveredNotification:(NSUserNotification *)lastNotification];
             [lastNotification release];
         }
         [[NSNotificationCenter defaultCenter] removeObserver:self];
     }
-#endif
 
     // Release everything
     [applicationName release];
@@ -306,12 +298,8 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
 
         [GrowlApplicationBridge setGrowlDelegate:self];
 
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
-        if (hasNativeNotifications) {
-            [[NSUserNotificationCenter defaultUserNotificationCenter]
-             setDelegate:(id<NSUserNotificationCenterDelegate>)self];
-        }
-#endif
+        [[NSUserNotificationCenter defaultUserNotificationCenter]
+            setDelegate:(id<NSUserNotificationCenterDelegate>)self];
     }
 }
 
@@ -374,8 +362,7 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
                                            isSticky:NO
                                        clickContext:nil
                                          identifier:@"VLCNowPlayingNotification"];
-        } else if (hasNativeNotifications) {
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
+        } else {
             // Make the OS X notification and string
             NSUserNotification *notification = [NSUserNotification new];
             NSString *desc = nil;
@@ -397,7 +384,6 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
             [notification setValue:@(YES) forKey:@"_showsButtons"];
             [NSUserNotificationCenter.defaultUserNotificationCenter deliverNotification:notification];
             [notification release];
-#endif
         }
 
         // Release stuff
@@ -425,7 +411,6 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
         isInForeground = NO;
 }
 
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
 - (void)userNotificationCenter:(NSUserNotificationCenter *)center
        didActivateNotification:(NSUserNotification *)notification
 {
@@ -446,5 +431,4 @@ static int InputCurrent( vlc_object_t *p_this, const char *psz_var,
     [notification retain];
     lastNotification = notification;
 }
-#endif
 @end

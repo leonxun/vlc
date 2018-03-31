@@ -44,6 +44,9 @@ ARCH := $(shell $(SRC)/get-arch.sh $(HOST))
 ifeq ($(ARCH)-$(HAVE_WIN32),x86_64-1)
 HAVE_WIN64 := 1
 endif
+ifeq ($(ARCH)-$(HAVE_WIN32),aarch64-1)
+HAVE_WIN64 := 1
+endif
 
 ifdef HAVE_CROSS_COMPILE
 need_pkg = 1
@@ -110,16 +113,7 @@ endif
 endif
 
 ifdef HAVE_MACOSX
-MIN_OSX_VERSION=10.7
-CC=xcrun cc
-CXX=xcrun c++
-AR=xcrun ar
-LD=xcrun ld
-STRIP=xcrun strip
-RANLIB=xcrun ranlib
-EXTRA_CFLAGS += -isysroot $(MACOSX_SDK) -mmacosx-version-min=$(MIN_OSX_VERSION) -DMACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION)
 EXTRA_CXXFLAGS += -stdlib=libc++
-EXTRA_LDFLAGS += -Wl,-syslibroot,$(MACOSX_SDK) -mmacosx-version-min=$(MIN_OSX_VERSION) -isysroot $(MACOSX_SDK) -DMACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION)
 ifeq ($(ARCH),x86_64)
 EXTRA_CFLAGS += -m64
 EXTRA_LDFLAGS += -m64
@@ -128,32 +122,26 @@ EXTRA_CFLAGS += -m32
 EXTRA_LDFLAGS += -m32
 endif
 
-XCODE_FLAGS = MACOSX_DEPLOYMENT_TARGET=$(MIN_OSX_VERSION) -sdk macosx$(OSX_VERSION) -arch $(ARCH)
+XCODE_FLAGS += -arch $(ARCH)
 
 endif
 
 CCAS=$(CC) -c
 
 ifdef HAVE_IOS
-CC=xcrun clang
-CXX=xcrun clang++
 ifdef HAVE_NEON
 AS=perl $(abspath ../../extras/tools/build/bin/gas-preprocessor.pl) $(CC)
 CCAS=gas-preprocessor.pl $(CC) -c
-else
-CCAS=$(CC) -c
 endif
-AR=xcrun ar
-LD=xcrun ld
-STRIP=xcrun strip
-RANLIB=xcrun ranlib
 EXTRA_CFLAGS += $(CFLAGS)
-EXTRA_LDFLAGS += $(LDFLAGS)
 endif
 
 ifdef HAVE_WIN32
 ifneq ($(shell $(CC) $(CFLAGS) -E -dM -include _mingw.h - < /dev/null | grep -E __MINGW64_VERSION_MAJOR),)
 HAVE_MINGW_W64 := 1
+endif
+ifneq ($(findstring clang, $(shell $(CC) --version)),)
+HAVE_CLANG := 1
 endif
 endif
 
@@ -173,8 +161,7 @@ EXTRA_CFLAGS += -I$(PREFIX)/include
 CPPFLAGS := $(CPPFLAGS) $(EXTRA_CFLAGS)
 CFLAGS := $(CFLAGS) $(EXTRA_CFLAGS) -g
 CXXFLAGS := $(CXXFLAGS) $(EXTRA_CFLAGS) $(EXTRA_CXXFLAGS) -g
-EXTRA_LDFLAGS += -L$(PREFIX)/lib
-LDFLAGS := $(LDFLAGS) $(EXTRA_LDFLAGS)
+LDFLAGS := $(LDFLAGS) -L$(PREFIX)/lib $(EXTRA_LDFLAGS)
 
 ifndef WITH_OPTIMIZATION
 CFLAGS := $(CFLAGS) -O0
@@ -351,7 +338,7 @@ UPDATE_AUTOCONFIG = for dir in $(AUTOMAKE_DATA_DIRS); do \
 		fi; \
 	done
 
-ifdef HAVE_IOS
+ifdef HAVE_DARWIN_OS
 AUTORECONF = AUTOPOINT=true autoreconf
 else
 AUTORECONF = autoreconf
@@ -360,6 +347,19 @@ RECONF = mkdir -p -- $(PREFIX)/share/aclocal && \
 	cd $< && $(AUTORECONF) -fiv $(ACLOCAL_AMFLAGS)
 CMAKE = cmake . -DCMAKE_TOOLCHAIN_FILE=$(abspath toolchain.cmake) \
 		-DCMAKE_INSTALL_PREFIX=$(PREFIX) $(CMAKE_GENERATOR)
+
+ifdef GPL
+REQUIRE_GPL =
+else
+REQUIRE_GPL = @echo "Package \"$<\" requires the GPL license." >&2; exit 1
+endif
+ifdef GNUV3
+REQUIRE_GNUV3 =
+else
+REQUIRE_GNUV3 = \
+	@echo "Package \"$<\" requires the version 3 of GNU licenses." >&2; \
+	exit 1
+endif
 
 #
 # Per-package build rules
@@ -453,6 +453,12 @@ help:
 # CMake toolchain
 toolchain.cmake:
 	$(RM) $@
+ifndef WITH_OPTIMIZATION
+	echo "set(CMAKE_BUILD_TYPE Debug)" >> $@
+else
+	echo "set(CMAKE_BUILD_TYPE Release)" >> $@
+endif
+	echo "set(CMAKE_SYSTEM_PROCESSOR $(ARCH))" >> $@
 ifdef HAVE_WIN32
 ifdef HAVE_WINDOWSPHONE
 	echo "set(CMAKE_SYSTEM_NAME WindowsPhone)" >> $@
@@ -463,7 +469,9 @@ else
 	echo "set(CMAKE_SYSTEM_NAME Windows)" >> $@
 endif
 endif
+ifdef HAVE_CROSS_COMPILE
 	echo "set(CMAKE_RC_COMPILER $(HOST)-windres)" >> $@
+endif
 endif
 ifdef HAVE_DARWIN_OS
 	echo "set(CMAKE_SYSTEM_NAME Darwin)" >> $@
@@ -490,8 +498,10 @@ endif
 	echo "set(CMAKE_CXX_COMPILER $(CXX))" >> $@
 	echo "set(CMAKE_FIND_ROOT_PATH $(PREFIX))" >> $@
 	echo "set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)" >> $@
+ifdef HAVE_CROSS_COMPILE
 	echo "set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)" >> $@
 	echo "set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)" >> $@
+endif
 
 # Default pattern rules
 .sum-%: $(SRC)/%/SHA512SUMS

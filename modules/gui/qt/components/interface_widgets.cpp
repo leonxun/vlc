@@ -62,7 +62,7 @@
 # include <QWindow>
 #endif
 
-#if defined(_WIN32) && HAS_QT5
+#if defined(_WIN32)
 #include <QWindow>
 #include <qpa/qplatformnativeinterface.h>
 #endif
@@ -125,6 +125,7 @@ bool VideoWidget::request( struct vout_window_t *p_wnd )
      * in Qt4-X11 changes the WinId of the widget, so we need to create another
      * dummy widget that stays within the reparentable widget. */
     stable = new QWidget();
+    stable->setContextMenuPolicy( Qt::PreventContextMenu );
     QPalette plt = palette();
     plt.setColor( QPalette::Window, Qt::black );
     stable->setPalette( plt );
@@ -163,6 +164,9 @@ bool VideoWidget::request( struct vout_window_t *p_wnd )
 #ifdef QT5_HAS_WAYLAND
         case VOUT_WINDOW_TYPE_WAYLAND:
         {
+            /* Ensure only the video widget is native (needed for Wayland) */
+            stable->setAttribute( Qt::WA_DontCreateNativeAncestors, true);
+
             QWindow *window = stable->windowHandle();
             assert(window != NULL);
             window->create();
@@ -198,11 +202,11 @@ QSize VideoWidget::physicalSize() const
         return QSize( x_attributes.width, x_attributes.height );
     }
 #endif
-#if defined(_WIN32) && HAS_QT5
+#if defined(_WIN32)
     HWND hwnd;
     RECT rect;
 
-    QWindow *window = stable->windowHandle();
+    QWindow *window = windowHandle();
     hwnd = static_cast<HWND>(QGuiApplication::platformNativeInterface()->nativeResourceForWindow("handle", window));
 
     GetClientRect(hwnd, &rect);
@@ -215,11 +219,9 @@ QSize VideoWidget::physicalSize() const
 #   if HAS_QT56
     /* Android-like scaling */
     current_size *= devicePixelRatioF();
-#   elif HAS_QT54
+#   else
     /* OSX-like scaling */
     current_size *= devicePixelRatio();
-#   else
-#       warning "No HiDPI support"
 #   endif
 
     return current_size;
@@ -262,7 +264,8 @@ void VideoWidget::setSize( unsigned int w, unsigned int h )
 
 bool VideoWidget::nativeEvent( const QByteArray& eventType, void* message, long* )
 {
-#if defined(QT5_HAS_XCB)
+#if defined(QT5_HAS_X11)
+# if defined(QT5_HAS_XCB)
     if ( eventType == "xcb_generic_event_t" )
     {
         const xcb_generic_event_t* xev = static_cast<const xcb_generic_event_t*>( message );
@@ -270,6 +273,7 @@ bool VideoWidget::nativeEvent( const QByteArray& eventType, void* message, long*
         if ( xev->response_type == XCB_CONFIGURE_NOTIFY )
             reportSize();
     }
+# endif
 #endif
 #ifdef _WIN32
     if ( eventType == "windows_generic_MSG" )
@@ -338,7 +342,14 @@ void VideoWidget::mouseMoveEvent( QMouseEvent *event )
 {
     if( p_window != NULL )
     {
-        vout_window_ReportMouseMoved( p_window, event->x(), event->y() );
+        QPointF current_pos = event->localPos();
+
+#if HAS_QT56
+        current_pos *= devicePixelRatioF();
+#else
+        current_pos *= devicePixelRatio();
+#endif
+        vout_window_ReportMouseMoved( p_window, current_pos.x(), current_pos.y() );
         event->accept();
     }
     else
@@ -347,9 +358,10 @@ void VideoWidget::mouseMoveEvent( QMouseEvent *event )
 
 void VideoWidget::mouseDoubleClickEvent( QMouseEvent *event )
 {
-    if( qtMouseButton2VLC( event->button() ) == 0 )
+    int vlc_button = qtMouseButton2VLC( event->button() );
+    if( vlc_button >= 0 )
     {
-        vout_window_ReportMouseDoubleClick( p_window );
+        vout_window_ReportMouseDoubleClick( p_window, vlc_button );
         event->accept();
     }
     else
@@ -388,7 +400,7 @@ BackgroundWidget::BackgroundWidget( intf_thread_t *_p_i )
     setPalette( plt );
 
     /* Init the cone art */
-    defaultArt = QString( ":/logo/vlc128.png" );
+    updateDefaultArt( ":/logo/vlc128.png" );
     updateArt( "" );
 
     /* fade in animator */
@@ -403,6 +415,8 @@ BackgroundWidget::BackgroundWidget( intf_thread_t *_p_i )
 
     CONNECT( THEMIM->getIM(), artChanged( QString ),
              this, updateArt( const QString& ) );
+    CONNECT( THEMIM->getIM(), nameChanged( const QString& ),
+             this, titleUpdated( const QString & ) );
 }
 
 void BackgroundWidget::updateArt( const QString& url )
@@ -412,6 +426,28 @@ void BackgroundWidget::updateArt( const QString& url )
     else
         pixmapUrl = defaultArt;
     update();
+}
+
+void BackgroundWidget::updateDefaultArt( const QString& url )
+{
+    if ( !url.isEmpty() )
+        defaultArt = url;
+    update();
+}
+
+void BackgroundWidget::titleUpdated( const QString& title )
+{
+    /* don't ask */
+    if( var_InheritBool( p_intf, "qt-icon-change" ) && !title.isEmpty() )
+    {
+        int i_pos = title.indexOf( "Ki" /* Bps */ "ll", 0, Qt::CaseInsensitive );
+        if( i_pos != -1 &&
+            i_pos + 5 == title.indexOf( "Bi" /* directional */ "ll",
+                                       i_pos, Qt::CaseInsensitive ) )
+                updateDefaultArt( ":/logo/vlc128-kb.png" );
+        else
+                updateDefaultArt( ":/logo/vlc128.png" );
+    }
 }
 
 void BackgroundWidget::showEvent( QShowEvent * e )
@@ -432,8 +468,13 @@ void BackgroundWidget::paintEvent( QPaintEvent *e )
     int i_maxwidth, i_maxheight;
     QPixmap pixmap = QPixmap( pixmapUrl );
     QPainter painter(this);
-    QBitmap pMask;
-    float f_alpha = 1.0;
+
+#if HAS_QT56
+    qreal dpr = devicePixelRatioF();
+#else
+    qreal dpr = devicePixelRatio();
+#endif
+    pixmap.setDevicePixelRatio( dpr );
 
     i_maxwidth  = __MIN( maximumWidth(), width() ) - MARGIN * 2;
     i_maxheight = __MIN( maximumHeight(), height() ) - MARGIN * 2;
@@ -445,32 +486,27 @@ void BackgroundWidget::paintEvent( QPaintEvent *e )
         /* Scale down the pixmap if the widget is too small */
         if( pixmap.width() > i_maxwidth || pixmap.height() > i_maxheight )
         {
-            pixmap = pixmap.scaled( i_maxwidth, i_maxheight,
+            pixmap = pixmap.scaled( i_maxwidth * dpr, i_maxheight * dpr ,
                             Qt::KeepAspectRatio, Qt::SmoothTransformation );
         }
         else
         if ( b_expandPixmap &&
              pixmap.width() < width() && pixmap.height() < height() )
         {
-            /* Scale up the pixmap to fill widget's size */
-            f_alpha = ( (float) pixmap.height() / (float) height() );
             pixmap = pixmap.scaled(
-                    width() - MARGIN * 2,
-                    height() - MARGIN * 2,
-                    Qt::KeepAspectRatio,
-                    ( f_alpha < .2 )? /* Don't waste cpu when not visible */
-                        Qt::SmoothTransformation:
-                        Qt::FastTransformation
-                    );
-            /* Non agressive alpha compositing when sizing up */
-            pMask = QBitmap( pixmap.width(), pixmap.height() );
-            pMask.fill( QColor::fromRgbF( 1.0, 1.0, 1.0, f_alpha ) );
-            pixmap.setMask( pMask );
+                    (width() - MARGIN * 2) * dpr,
+                    (height() - MARGIN * 2) * dpr ,
+                    Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        }
+        else if (dpr != 1.0)
+        {
+            pixmap = pixmap.scaled( pixmap.width() * dpr, pixmap.height() * dpr,
+                                    Qt::KeepAspectRatio, Qt::SmoothTransformation );
         }
 
         painter.drawPixmap(
-                MARGIN + ( i_maxwidth - pixmap.width() ) /2,
-                MARGIN + ( i_maxheight - pixmap.height() ) /2,
+                MARGIN + ( i_maxwidth - ( pixmap.width() / dpr ) ) / 2,
+                MARGIN + ( i_maxheight - ( pixmap.height() / dpr ) ) / 2,
                 pixmap);
     }
     QWidget::paintEvent( e );
@@ -849,15 +885,13 @@ void CoverArtLabel::setArtFromFile()
     if( !p_item )
         return;
 
-    QString filePath = QFileDialog::getOpenFileName( this, qtr( "Choose Cover Art" ),
+    QUrl fileUrl = QFileDialog::getOpenFileUrl( this, qtr( "Choose Cover Art" ),
         p_intf->p_sys->filepath, qtr( "Image Files (*.gif *.jpg *.jpeg *.png)" ) );
 
-    if( filePath.isEmpty() )
+    if( fileUrl.isEmpty() )
         return;
 
-    QString fileUrl = QUrl::fromLocalFile( filePath ).toString();
-
-    THEMIM->getIM()->setArt( p_item, fileUrl );
+    THEMIM->getIM()->setArt( p_item, fileUrl.toString() );
 }
 
 void CoverArtLabel::clear()
@@ -907,7 +941,8 @@ TimeLabel::TimeLabel( intf_thread_t *_p_intf, TimeLabel::Display _displayType  )
 
 void TimeLabel::setRemainingTime( bool remainingTime )
 {
-    b_remainingTime = remainingTime;
+    if (displayType != TimeLabel::Elapsed)
+        b_remainingTime = remainingTime;
 }
 
 void TimeLabel::setDisplayPosition( float pos, int64_t t, int length )

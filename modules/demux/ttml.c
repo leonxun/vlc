@@ -29,13 +29,13 @@
 #include <vlc_demux.h>
 #include <vlc_xml.h>
 #include <vlc_strings.h>
-#include <vlc_memory.h>
 #include <vlc_memstream.h>
 #include <vlc_es_out.h>
 #include <vlc_charset.h>          /* FromCharset */
 
 #include <assert.h>
 #include <stdlib.h>
+#include <ctype.h>
 
 #include "../codec/ttml/ttml.h"
 
@@ -276,6 +276,11 @@ static int Control( demux_t* p_demux, int i_query, va_list args )
                 return VLC_SUCCESS;
             }
             break;
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+            return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
+
         case DEMUX_GET_PTS_DELAY:
         case DEMUX_GET_FPS:
         case DEMUX_GET_META:
@@ -351,7 +356,7 @@ static int Demux( demux_t* p_demux )
 
         if ( !p_sys->b_slave && p_sys->b_first_time )
         {
-            es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + i_playbacktime );
+            es_out_SetPCR( p_demux->out, VLC_TS_0 + i_playbacktime );
             p_sys->b_first_time = false;
         }
 
@@ -381,7 +386,7 @@ static int Demux( demux_t* p_demux )
 
     if ( !p_sys->b_slave )
     {
-        es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_next_demux_time );
+        es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_next_demux_time );
         p_sys->i_next_demux_time += CLOCK_FREQ / 8;
     }
 
@@ -391,7 +396,7 @@ static int Demux( demux_t* p_demux )
     return VLC_DEMUXER_SUCCESS;
 }
 
-int OpenDemux( vlc_object_t* p_this )
+int tt_OpenDemux( vlc_object_t* p_this )
 {
     demux_t     *p_demux = (demux_t*)p_this;
     demux_sys_t *p_sys;
@@ -404,24 +409,32 @@ int OpenDemux( vlc_object_t* p_this )
     const char *psz_xml = (const char *) p_peek;
     size_t i_xml  = i_peek;
 
+    /* Try to probe without xml module/loading the full document */
     char *psz_alloc = NULL;
     switch( GetQWBE(p_peek) )
     {
         /* See RFC 3023 Part 4 */
-        case 0xFFFE3C003F007800UL: /* UTF16 BOM<?xml */
-        case 0xFEFF003C003F0078UL: /* UTF16 BOM<?xml */
+        case UINT64_C(0xFFFE3C003F007800): /* UTF16 BOM<? */
+        case UINT64_C(0xFFFE3C003F007400): /* UTF16 BOM<t */
+        case UINT64_C(0xFEFF003C003F0078): /* UTF16 BOM<? */
+        case UINT64_C(0xFEFF003C003F0074): /* UTF16 BOM<t */
             psz_alloc = FromCharset( "UTF-16", p_peek, i_peek );
             break;
-        case 0x3C003F0078006D00UL: /* UTF16-LE <?xml */
+        case UINT64_C(0x3C003F0078006D00): /* UTF16-LE <?xm */
+        case UINT64_C(0x3C003F0074007400): /* UTF16-LE <tt */
             psz_alloc = FromCharset( "UTF-16LE", p_peek, i_peek );
             break;
-        case 0x003C003F0078006DUL: /* UTF16-BE <?xml */
+        case UINT64_C(0x003C003F0078006D): /* UTF16-BE <?xm */
+        case UINT64_C(0x003C003F00740074): /* UTF16-BE <tt */
             psz_alloc = FromCharset( "UTF-16BE", p_peek, i_peek );
             break;
-        case 0x3C3F786D6C207665UL: /* UTF8 <?xml */
+        case UINT64_C(0xEFBBBF3C3F786D6C): /* UTF8 BOM<?xml */
+        case UINT64_C(0x3C3F786D6C207665): /* UTF8 <?xml ve */
+        case UINT64_C(0xEFBBBF3C74742078): /* UTF8 BOM<tt x*/
             break;
         default:
-            return VLC_EGENERIC;
+            if(GetDWBE(p_peek) != UINT32_C(0x3C747420)) /* tt node without xml document marker */
+                return VLC_EGENERIC;
     }
 
     if( psz_alloc )
@@ -431,8 +444,9 @@ int OpenDemux( vlc_object_t* p_this )
     }
 
     /* Simplified probing. Valid TTML must have a namespace declaration */
-    const char *psz_tt = strnstr( psz_xml, "tt ", i_xml );
+    const char *psz_tt = strnstr( psz_xml, "tt", i_xml );
     if( !psz_tt || psz_tt == psz_xml ||
+        ((size_t)(&psz_tt[2] - (const char*)p_peek)) == i_xml || isalpha(psz_tt[2]) ||
         (psz_tt[-1] != ':' && psz_tt[-1] != '<') )
     {
         free( psz_alloc );
@@ -522,12 +536,12 @@ int OpenDemux( vlc_object_t* p_this )
     return VLC_SUCCESS;
 
 error:
-    CloseDemux( p_demux );
+    tt_CloseDemux( p_demux );
 
     return VLC_EGENERIC;
 }
 
-void CloseDemux( demux_t* p_demux )
+void tt_CloseDemux( demux_t* p_demux )
 {
     demux_sys_t* p_sys = p_demux->p_sys;
 

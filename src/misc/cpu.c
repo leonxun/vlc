@@ -37,7 +37,6 @@
 
 #include <assert.h>
 
-#ifndef __linux__
 #include <sys/types.h>
 #ifndef _WIN32
 #include <unistd.h>
@@ -121,7 +120,7 @@ static void Altivec_test (void)
  * Determines the CPU capabilities and stores them in cpu_flags.
  * The result can be retrieved with vlc_CPU().
  */
-void vlc_CPU_init (void)
+static void vlc_CPU_init(void)
 {
     uint32_t i_capabilities = 0;
 
@@ -266,17 +265,12 @@ out:
 /**
  * Retrieves pre-computed CPU capability flags
  */
-unsigned vlc_CPU (void)
+VLC_WEAK unsigned vlc_CPU(void)
 {
-/* On Windows and OS/2,
- * initialized from DllMain() and _DLL_InitTerm() respectively, instead */
-#if !defined(_WIN32) && !defined(__OS2__)
-    static pthread_once_t once = PTHREAD_ONCE_INIT;
-    pthread_once (&once, vlc_CPU_init);
-#endif
+    static vlc_once_t once = VLC_STATIC_ONCE;
+    vlc_once(&once, vlc_CPU_init);
     return cpu_flags;
 }
-#endif
 
 void vlc_CPU_dump (vlc_object_t *obj)
 {

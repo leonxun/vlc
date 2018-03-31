@@ -58,7 +58,7 @@ vlc_module_begin ()
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACODEC )
     set_description( N_("Linear PCM audio decoder") )
-    set_capability( "decoder", 100 )
+    set_capability( "audio decoder", 100 )
     set_callbacks( OpenDecoder, CloseCommon )
 
     add_submodule ()
@@ -214,9 +214,8 @@ static int WidiHeader( unsigned *pi_rate,
 /*****************************************************************************
  * OpenCommon:
  *****************************************************************************/
-static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
+static int OpenCommon( decoder_t *p_dec, bool b_packetizer )
 {
-    decoder_t *p_dec = (decoder_t*)p_this;
     decoder_sys_t *p_sys;
     int i_type;
     int i_header_size;
@@ -259,8 +258,6 @@ static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
     p_sys->i_chans_to_reorder = 0;
 
     /* Set output properties */
-    p_dec->fmt_out.i_cat = AUDIO_ES;
-
     if( b_packetizer )
     {
         switch( i_type )
@@ -306,11 +303,11 @@ static int OpenCommon( vlc_object_t *p_this, bool b_packetizer )
 }
 static int OpenDecoder( vlc_object_t *p_this )
 {
-    return OpenCommon( p_this, false );
+    return OpenCommon( (decoder_t*) p_this, false );
 }
 static int OpenPacketizer( vlc_object_t *p_this )
 {
-    return OpenCommon( p_this, true );
+    return OpenCommon( (decoder_t*) p_this, true );
 }
 
 /*****************************************************************************
@@ -415,7 +412,6 @@ static block_t *Packetize( decoder_t *p_dec, block_t **pp_block )
     }
     p_dec->fmt_out.audio.i_rate = i_rate;
     p_dec->fmt_out.audio.i_channels = i_channels;
-    p_dec->fmt_out.audio.i_original_channels = i_original_channels;
     p_dec->fmt_out.audio.i_physical_channels = i_original_channels;
 
     if ( p_sys->i_type == LPCM_AOB )
@@ -1208,7 +1204,7 @@ static void AobExtract( block_t *p_aout_buffer,
                                  | (p_block->p_buffer[2*i_src+1] << 16)
                                  | (p_block->p_buffer[4*g->i_channels+i_src] <<  8);
 #ifdef WORDS_BIGENDIAN
-                        *p_out32 = bswap32(*p_out32);
+                        *p_out32 = vlc_bswap32(*p_out32);
 #endif
                         i_aout_written += 4;
                     }
@@ -1219,7 +1215,7 @@ static void AobExtract( block_t *p_aout_buffer,
                                  | (p_block->p_buffer[2*i_src+1] << 16)
                                  | (((p_block->p_buffer[4*g->i_channels+i_src] << ((!n)?0:4) ) & 0xf0) <<  8);
 #ifdef WORDS_BIGENDIAN
-                        *p_out32 = bswap32(*p_out32);
+                        *p_out32 = vlc_bswap32(*p_out32);
 #endif
                         i_aout_written += 4;
                     }
@@ -1242,7 +1238,7 @@ static void AobExtract( block_t *p_aout_buffer,
                             *p_out32 = (p_block->p_buffer[2*i_src+0] << 24)
                                      | (p_block->p_buffer[2*i_src+1] << 16);
 #ifdef WORDS_BIGENDIAN
-                            *p_out32 = bswap32(*p_out32);
+                            *p_out32 = vlc_bswap32(*p_out32);
 #endif
                             i_aout_written += 4;
                         }

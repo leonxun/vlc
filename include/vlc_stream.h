@@ -45,7 +45,7 @@ extern "C" {
 
 struct stream_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     /* Module properties for stream filter */
     module_t    *p_module;
@@ -56,8 +56,27 @@ struct stream_t
     char        *psz_filepath; /**< Local file path (if applicable) */
     bool         b_preparsing; /**< True if this access is used to preparse */
 
-    /* Stream source for stream filter */
-    stream_t *p_source;
+    union {
+        /**
+         * Input stream
+         *
+         * Depending on the module capability:
+         * - "stream filter" or "demux": input byte stream (not NULL)
+         * - "access" or "access_demux": a NULL pointer
+         * - "demux_filter": undefined
+         */
+        stream_t    *s;
+        /**
+         * Input demuxer
+         *
+         * If the module capability is "demux_filter", this is the upstream
+         * demuxer or demux filter. Otherwise, this is undefined.
+         */
+        demux_t *p_next;
+    };
+
+    /* es output */
+    es_out_t    *out;   /* our p_es_out */
 
     /**
      * Read data.
@@ -103,6 +122,8 @@ struct stream_t
      * NULL if the stream is not a directory.
      */
     int         (*pf_readdir)(stream_t *, input_item_node_t *);
+
+    int         (*pf_demux)(stream_t *);
 
     /**
      * Seek.
@@ -153,6 +174,7 @@ enum stream_query_e
     STREAM_GET_META,        /**< arg1= vlc_meta_t *       res=can fail */
     STREAM_GET_CONTENT_TYPE,    /**< arg1= char **         res=can fail */
     STREAM_GET_SIGNAL,      /**< arg1=double *pf_quality, arg2=double *pf_strength   res=can fail */
+    STREAM_GET_TAGS,        /**< arg1=const block_t ** res=can fail */
 
     STREAM_SET_PAUSE_STATE = 0x200, /**< arg1= bool        res=can fail */
     STREAM_SET_TITLE,       /**< arg1= int          res=can fail */
@@ -237,6 +259,11 @@ VLC_API block_t *vlc_stream_ReadBlock(stream_t *) VLC_USED;
 /**
  * Tells the current stream position.
  *
+ * This function tells the current read offset (in bytes) from the start of
+ * the start of the stream.
+ * @note The read offset may be larger than the stream size, either because of
+ * a seek past the end, or because the stream shrank asynchronously.
+ *
  * @return the byte offset from the beginning of the stream (cannot fail)
  */
 VLC_API uint64_t vlc_stream_Tell(const stream_t *) VLC_USED;
@@ -265,6 +292,11 @@ VLC_API bool vlc_stream_Eof(const stream_t *) VLC_USED;
 
 /**
  * Sets the current stream position.
+ *
+ * This function changes the read offset within a stream, if the stream
+ * supports seeking. In case of error, the read offset is not changed.
+ *
+ * @note It is possible (but not useful) to seek past the end of a stream.
  *
  * @param offset byte offset from the beginning of the stream
  * @return zero on success, a negative value on error
@@ -313,6 +345,15 @@ static inline int64_t stream_Size( stream_t *s )
     if( i_pos >> 62 )
         return (int64_t)1 << 62;
     return i_pos;
+}
+
+VLC_USED
+static inline bool stream_HasExtension( stream_t *s, const char *extension )
+{
+    const char *name = (s->psz_filepath != NULL) ? s->psz_filepath
+                                                 : s->psz_url;
+    const char *ext = strrchr( name, '.' );
+    return ext != NULL && !strcasecmp( ext, extension );
 }
 
 /**

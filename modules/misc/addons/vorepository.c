@@ -26,6 +26,10 @@
 # include "config.h"
 #endif
 
+#include <assert.h>
+#include <fcntl.h>
+#include <unistd.h>     /* write() */
+
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_stream.h>
@@ -36,21 +40,18 @@
 #include <vlc_url.h>
 #include "xmlreading.h"
 
-#include "assert.h"
-
 /*****************************************************************************
  * Local prototypes
  *****************************************************************************/
 
 static int   Open ( vlc_object_t * );
 static void  Close ( vlc_object_t * );
-static int   Find ( addons_finder_t *p_finder );
 static int   Retrieve ( addons_finder_t *p_finder, addon_entry_t *p_entry );
 static int   OpenDesignated ( vlc_object_t * );
 static int   FindDesignated ( addons_finder_t *p_finder );
 
 #define ADDONS_MODULE_SHORTCUT "addons.vo"
-#define ADDONS_REPO_SCHEMEHOST "http://api.addons.videolan.org"
+#define ADDONS_REPO_SCHEMEHOST "https://api-addons.videolan.org"
 /*****************************************************************************
  * Module descriptor
  ****************************************************************************/
@@ -89,7 +90,7 @@ static int ParseManifest( addons_finder_t *p_finder, addon_entry_t *p_entry,
     const char *attr, *value;
 
     /* temp reading */
-    const char *psz_filename = NULL;
+    char *psz_filename = NULL;
     int i_filetype = -1;
 
     xml_reader_t *p_xml_reader = xml_ReaderCreate( p_finder, p_stream );
@@ -150,7 +151,7 @@ static int ParseManifest( addons_finder_t *p_finder, addon_entry_t *p_entry,
             if ( data_pointer.e_type == TYPE_STRING )
             {
                 if( data_pointer.u_data.ppsz )
-                    free( data_pointer.u_data.ppsz );
+                    free( *data_pointer.u_data.ppsz );
                 *data_pointer.u_data.ppsz = strdup( p_node );
             }
             else
@@ -185,6 +186,7 @@ static int ParseManifest( addons_finder_t *p_finder, addon_entry_t *p_entry,
                     }
                 }
                 /* reset temp */
+                free( psz_filename );
                 psz_filename = NULL;
                 i_filetype = -1;
             }
@@ -327,31 +329,31 @@ end:
    return i_num_entries_created;
 }
 
+static stream_t * vlc_stream_NewURL_ND( addons_finder_t *p_obj, const char *psz_uri )
+{
+    stream_t *p_stream = vlc_stream_NewURL( p_obj, psz_uri );
+    if( p_stream )
+    {
+        /* (non applicable everywhere) remove extra
+         * compression, bad wine madness :YYY */
+        stream_t *p_chain = vlc_stream_FilterNew( p_stream, "inflate" );
+        if( p_chain )
+            p_stream = p_chain;
+    }
+    return p_stream;
+}
+
 static int Find( addons_finder_t *p_finder )
 {
-    bool b_done = false;
+    stream_t *p_stream = vlc_stream_NewURL_ND( p_finder,
+                                            ADDONS_REPO_SCHEMEHOST "/xml" );
+    if ( !p_stream )
+        return VLC_EGENERIC;
 
-    while ( !b_done )
-    {
-        char *psz_uri = NULL;
+    int i_res = ParseCategoriesInfo( p_finder, p_stream );
+    vlc_stream_Delete( p_stream );
 
-        if ( ! asprintf( &psz_uri, ADDONS_REPO_SCHEMEHOST"/xml" ) ) return VLC_ENOMEM;
-        b_done = true;
-
-        stream_t *p_stream = vlc_stream_NewURL( p_finder, psz_uri );
-        free( psz_uri );
-        if ( !p_stream ) return VLC_EGENERIC;
-
-        if ( ! ParseCategoriesInfo( p_finder, p_stream ) )
-        {
-            /* no more entries have been read: was last page or error */
-            b_done = true;
-        }
-
-        vlc_stream_Delete( p_stream );
-    }
-
-    return VLC_SUCCESS;
+    return i_res > 0 ? VLC_SUCCESS : VLC_EGENERIC;
 }
 
 static int Retrieve( addons_finder_t *p_finder, addon_entry_t *p_entry )
@@ -379,12 +381,12 @@ static int Retrieve( addons_finder_t *p_finder, addon_entry_t *p_entry )
             free( psz_archive_uri );
             return VLC_ENOMEM;
         }
-        p_stream = vlc_stream_NewURL( p_finder, psz_uri );
+        p_stream = vlc_stream_NewURL_ND( p_finder, psz_uri );
         free( psz_uri );
     }
     else
     {
-        p_stream = vlc_stream_NewURL( p_finder, psz_archive_uri );
+        p_stream = vlc_stream_NewURL_ND( p_finder, psz_archive_uri );
     }
 
     msg_Dbg( p_finder, "downloading archive %s", psz_archive_uri );
@@ -406,8 +408,9 @@ static int Retrieve( addons_finder_t *p_finder, addon_entry_t *p_entry )
         return VLC_EGENERIC;
     }
 
-    FILE *p_destfile = vlc_fopen( p_finder->p_sys->psz_tempfile, "w" );
-    if( !p_destfile )
+    int fd = vlc_open( p_finder->p_sys->psz_tempfile,
+                       O_WRONLY | O_CREAT | O_EXCL, 0600 );
+    if( fd == -1 )
     {
         msg_Err( p_finder, "Failed to open addon temp storage file" );
         FREENULL(p_finder->p_sys->psz_tempfile);
@@ -416,19 +419,24 @@ static int Retrieve( addons_finder_t *p_finder, addon_entry_t *p_entry )
     }
 
     char buffer[1<<10];
-    int i_read = 0;
+    ssize_t i_read = 0;
+    int i_ret = VLC_SUCCESS;
+
     while ( ( i_read = vlc_stream_Read( p_stream, &buffer, 1<<10 ) ) > 0 )
     {
-        if ( fwrite( &buffer, i_read, 1, p_destfile ) < 1 )
+        if ( write( fd, buffer, i_read ) != i_read )
         {
             msg_Err( p_finder, "Failed to write to Addon file" );
-            fclose( p_destfile );
-            vlc_stream_Delete( p_stream );
-            return VLC_EGENERIC;
+            i_ret = VLC_EGENERIC;
+            break;
         }
     }
-    fclose( p_destfile );
+
+    vlc_close( fd );
     vlc_stream_Delete( p_stream );
+
+    if (i_ret)
+        return i_ret;
 
     msg_Dbg( p_finder, "Reading manifest from %s", p_finder->p_sys->psz_tempfile );
 
@@ -452,7 +460,7 @@ static int Retrieve( addons_finder_t *p_finder, addon_entry_t *p_entry )
     }
 
     vlc_mutex_lock( &p_entry->lock );
-    int i_ret = ( ParseManifest( p_finder, p_entry, psz_tempfileuri, p_stream ) > 0 )
+    i_ret = ( ParseManifest( p_finder, p_entry, psz_tempfileuri, p_stream ) > 0 )
                     ? VLC_SUCCESS : VLC_EGENERIC;
     vlc_mutex_unlock( &p_entry->lock );
     free( psz_tempfileuri );

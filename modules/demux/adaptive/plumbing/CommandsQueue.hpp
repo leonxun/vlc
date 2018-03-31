@@ -22,8 +22,8 @@
 
 #include <vlc_common.h>
 #include <vlc_es.h>
-#include <vlc_atomic.h>
 
+#include <atomic>
 #include <list>
 
 namespace adaptive
@@ -59,6 +59,7 @@ namespace adaptive
             virtual ~EsOutSendCommand();
             virtual void Execute( es_out_t *out );
             virtual mtime_t getTime() const;
+            const void * esIdentifier() const;
 
         protected:
             EsOutSendCommand( FakeESOutID *, block_t * );
@@ -159,9 +160,9 @@ namespace adaptive
             void Commit();
             bool isEmpty() const;
             void setDrop( bool );
-            void setFlush();
-            void setEOF();
-            bool isFlushing() const;
+            void setDraining();
+            void setEOF( bool );
+            bool isDraining() const;
             bool isEOF() const;
             mtime_t getDemuxedAmount() const;
             mtime_t getBufferingLevel() const;
@@ -172,11 +173,12 @@ namespace adaptive
             CommandsFactory *commandsFactory;
             vlc_mutex_t lock;
             void LockedCommit();
+            void LockedSetDraining();
             std::list<AbstractCommand *> incoming;
             std::list<AbstractCommand *> commands;
             mtime_t bufferinglevel;
             mtime_t pcr;
-            bool b_flushing;
+            bool b_draining;
             bool b_drop;
             bool b_eof;
     };

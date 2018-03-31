@@ -37,14 +37,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#ifndef HAVE_LSTAT
-# define lstat(a, b) stat(a, b)
-#endif
 #include <dirent.h>
 #include <sys/socket.h>
-#ifndef O_TMPFILE
-# define O_TMPFILE 0
-#endif
 
 #include <vlc_common.h>
 #include <vlc_fs.h>
@@ -62,12 +56,12 @@ int vlc_open (const char *filename, int flags, ...)
     va_list ap;
 
     va_start (ap, flags);
-    if (flags & (O_CREAT|O_TMPFILE))
+    if (flags & O_CREAT)
         mode = va_arg (ap, unsigned int);
     va_end (ap);
 
 #ifdef O_CLOEXEC
-    return open(filename, flags, mode | O_CLOEXEC);
+    return open(filename, flags | O_CLOEXEC, mode);
 #else
     int fd = open(filename, flags, mode);
     if (fd != -1)
@@ -82,12 +76,12 @@ int vlc_openat (int dir, const char *filename, int flags, ...)
     va_list ap;
 
     va_start (ap, flags);
-    if (flags & (O_CREAT|O_TMPFILE))
+    if (flags & O_CREAT)
         mode = va_arg (ap, unsigned int);
     va_end (ap);
 
 #ifdef HAVE_OPENAT
-    return openat(dir, filename, flags, mode | O_CLOEXEC);
+    return openat(dir, filename, flags | O_CLOEXEC, mode);
 #else
     VLC_UNUSED (dir);
     VLC_UNUSED (filename);
@@ -109,22 +103,10 @@ int vlc_mkstemp (char *template)
 #endif
 }
 
-int vlc_memfd (void)
+VLC_WEAK int vlc_memfd(void)
 {
-    int fd;
-#ifdef O_TMPFILE
-    fd = vlc_open ("/tmp", O_RDWR|O_TMPFILE, S_IRUSR|S_IWUSR);
-    if (fd != -1)
-        return fd;
-    /* ENOENT means either /tmp is missing (!) or the kernel does not support
-     * O_TMPFILE. EISDIR means /tmp exists but the kernel does not support
-     * O_TMPFILE. EOPNOTSUPP means the kernel supports O_TMPFILE but the /tmp
-     * filesystem does not. Do not fallback on other errors. */
-    if (errno != ENOENT && errno != EISDIR && errno != EOPNOTSUPP)
-        return -1;
-#endif
-
     char bufpath[] = "/tmp/"PACKAGE_NAME"XXXXXX";
+    int fd;
 
     fd = vlc_mkstemp (bufpath);
     if (fd != -1)

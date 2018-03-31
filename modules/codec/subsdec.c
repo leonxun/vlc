@@ -180,7 +180,7 @@ static void CloseDecoder  ( vlc_object_t * );
 vlc_module_begin ()
     set_shortname( N_("Subtitles"))
     set_description( N_("Text subtitle decoder") )
-    set_capability( "decoder", 50 )
+    set_capability( "spu decoder", 50 )
     set_callbacks( OpenDecoder, CloseDecoder )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_SCODEC )
@@ -233,14 +233,13 @@ static int OpenDecoder( vlc_object_t *p_this )
             return VLC_EGENERIC;
     }
 
-    p_dec->pf_decode = DecodeBlock;
-    p_dec->fmt_out.i_cat = SPU_ES;
-    p_dec->fmt_out.i_codec = 0;
-
     /* Allocate the memory needed to store the decoder's structure */
     p_dec->p_sys = p_sys = calloc( 1, sizeof( *p_sys ) );
     if( p_sys == NULL )
         return VLC_ENOMEM;
+
+    p_dec->pf_decode = DecodeBlock;
+    p_dec->fmt_out.i_codec = 0;
 
     /* init of p_sys */
     p_sys->i_align = 0;
@@ -457,8 +456,9 @@ static subpicture_t *ParseText( decoder_t *p_dec, block_t *p_block )
 
     subpicture_updater_sys_t *p_spu_sys = p_spu->updater.p_sys;
 
-    p_spu_sys->region.inner_align = SUBPICTURE_ALIGN_BOTTOM | p_sys->i_align;
-    p_spu_sys->region.p_segments = ParseSubtitles( &p_spu_sys->region.inner_align, psz_subtitle );
+    p_spu_sys->region.align = SUBPICTURE_ALIGN_BOTTOM | p_sys->i_align;
+    p_spu_sys->region.inner_align = SUBPICTURE_ALIGN_BOTTOM;
+    p_spu_sys->region.p_segments = ParseSubtitles( &p_spu_sys->region.align, psz_subtitle );
 
     free( psz_subtitle );
 
@@ -514,7 +514,10 @@ static char* ConsumeAttribute( const char** ppsz_subtitle, char** ppsz_attribute
     while ( *psz_subtitle && *psz_subtitle != '=' )
         psz_subtitle++;
     if ( !*psz_subtitle )
+    {
+        *ppsz_subtitle = psz_subtitle;
         return psz_attribute_name;
+    }
     // Skip the '=' sign
     psz_subtitle++;
 
@@ -537,13 +540,16 @@ static char* ConsumeAttribute( const char** ppsz_subtitle, char** ppsz_attribute
 
     attr_len = 0;
     while ( *psz_subtitle && ( ( delimiter != 0 && *psz_subtitle != delimiter ) ||
-                               ( delimiter == 0 && ( isalnum( *psz_subtitle ) || *psz_subtitle == '#' ) ) ) )
+                               ( delimiter == 0 && ( !isspace(*psz_subtitle) && *psz_subtitle != '>' ) ) ) )
     {
         psz_subtitle++;
         attr_len++;
     }
     if ( attr_len == 0 )
+    {
+        *ppsz_subtitle = psz_subtitle;
         return psz_attribute_name;
+    }
     if ( unlikely( !( *ppsz_attribute_value = malloc( attr_len + 1 ) ) ) )
     {
         free( psz_attribute_name );
@@ -581,7 +587,7 @@ static char* GetTag( const char** ppsz_subtitle, bool b_closing )
     size_t tag_size = 1;
     while ( isalnum( psz_subtitle[tag_size] ) || psz_subtitle[tag_size] == '_' )
         tag_size++;
-    char* psz_tagname = malloc( ( tag_size + 1 ) * sizeof( *psz_tagname ) );
+    char* psz_tagname = vlc_alloc( tag_size + 1, sizeof( *psz_tagname ) );
     if ( unlikely( !psz_tagname ) )
         return NULL;
     strncpy( psz_tagname, psz_subtitle, tag_size );
@@ -672,7 +678,7 @@ static text_style_t* DuplicateAndPushStyle(style_stack_t** pp_stack)
     style_stack_t* p_entry = malloc( sizeof( *p_entry ) );
     if ( unlikely( !p_entry ) )
     {
-        free( p_dup );
+        text_style_Delete( p_dup );
         return NULL;
     }
     // Give the style ownership to the segment.
@@ -786,12 +792,14 @@ static text_segment_t* ParseSubtitles( int *pi_align, const char *psz_subtitle )
                         }
                         if ( !strcasecmp( psz_attribute_name, "face" ) )
                         {
+                            free(p_segment->style->psz_fontname);
                             p_segment->style->psz_fontname = psz_attribute_value;
                             // We don't want to free the attribute value since it has become our fontname
                             psz_attribute_value = NULL;
                         }
                         else if ( !strcasecmp( psz_attribute_name, "family" ) )
                         {
+                            free(p_segment->style->psz_monofontname);
                             p_segment->style->psz_monofontname = psz_attribute_value;
                             psz_attribute_value = NULL;
                         }
@@ -900,6 +908,15 @@ static text_segment_t* ParseSubtitles( int *pi_align, const char *psz_subtitle )
                         psz_subtitle++;
                     free( psz_tagname );
                 }
+                else
+                {
+                    /**
+                      * This doesn't appear to be a valid tag closing syntax.
+                      * Simply append the text
+                      */
+                    AppendString( p_segment, "</" );
+                    psz_subtitle += 2;
+                }
             }
             else
             {
@@ -985,6 +1002,7 @@ static text_segment_t* ParseSubtitles( int *pi_align, const char *psz_subtitle )
             else if( psz_subtitle[1] == 'F' || psz_subtitle[1] == 'f' )
             {
                 p_segment = NewTextSegmentPushStyle( p_segment, &p_stack );
+                free(p_segment->style->psz_fontname);
                 p_segment->style->psz_fontname = strndup( &psz_subtitle[3], i_len );
             }
             else if( psz_subtitle[1] == 'S' || psz_subtitle[1] == 's' )

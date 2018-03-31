@@ -34,7 +34,6 @@
 
 #include <vlc_common.h>
 #include <vlc_block.h>
-#include <vlc_memory.h>
 #include <vlc_access.h>
 #include <vlc_charset.h>
 #include <vlc_interrupt.h>
@@ -75,7 +74,7 @@ stream_t *vlc_stream_CommonNew(vlc_object_t *parent,
 
     s->p_module = NULL;
     s->psz_url = NULL;
-    s->p_source = NULL;
+    s->s = NULL;
     s->pf_read = NULL;
     s->pf_block = NULL;
     s->pf_readdir = NULL;
@@ -130,7 +129,7 @@ stream_t *(vlc_stream_NewURL)(vlc_object_t *p_parent, const char *psz_url)
     if( !psz_url )
         return NULL;
 
-    stream_t *s = stream_AccessNew( p_parent, NULL, false, psz_url );
+    stream_t *s = stream_AccessNew( p_parent, NULL, NULL, false, psz_url );
     if( s == NULL )
         msg_Err( p_parent, "no suitable access module for `%s'", psz_url );
     return s;
@@ -196,6 +195,12 @@ char *vlc_stream_ReadLine( stream_t *s )
         {
             const char *psz_encoding = NULL;
 
+            if( unlikely(priv->text.conv != (vlc_iconv_t)-1) )
+            {   /* seek back to beginning? reset */
+                vlc_iconv_close( priv->text.conv );
+                priv->text.conv = (vlc_iconv_t)-1;
+            }
+
             if( !memcmp( p_data, "\xFF\xFE", 2 ) )
             {
                 psz_encoding = "UTF-16LE";
@@ -210,10 +215,13 @@ char *vlc_stream_ReadLine( stream_t *s )
             if( psz_encoding != NULL )
             {
                 msg_Dbg( s, "UTF-16 BOM detected" );
-                priv->text.char_width = 2;
                 priv->text.conv = vlc_iconv_open( "UTF-8", psz_encoding );
-                if( priv->text.conv == (vlc_iconv_t)-1 )
+                if( unlikely(priv->text.conv == (vlc_iconv_t)-1) )
+                {
                     msg_Err( s, "iconv_open failed" );
+                    goto error;
+                }
+                priv->text.char_width = 2;
             }
         }
 
@@ -299,9 +307,6 @@ char *vlc_stream_ReadLine( stream_t *s )
 
     if( i_read > 0 )
     {
-        memset(p_line + i_line, 0, priv->text.char_width);
-        i_line += priv->text.char_width; /* the added \0 */
-
         if( priv->text.char_width > 1 )
         {
             int i_new_line = 0;
@@ -312,7 +317,7 @@ char *vlc_stream_ReadLine( stream_t *s )
 
             /* iconv */
             /* UTF-8 needs at most 150% of the buffer as many as UTF-16 */
-            i_new_line = i_line * 3 / 2;
+            i_new_line = i_line * 3 / 2 + 1;
             psz_new_line = malloc( i_new_line );
             if( psz_new_line == NULL )
                 goto error;

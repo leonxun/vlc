@@ -59,6 +59,7 @@ vlc_module_begin ()
                 VOLUME_TEXT, VOLUME_LONGTEXT, true)
     change_integer_range(0, AOUT_VOLUME_MAX)
     add_string("auhal-audio-device", "", DEVICE_TEXT, DEVICE_LONGTEXT, true)
+    add_string("auhal-warned-devices", "", NULL, NULL, true)
     add_obsolete_integer("macosx-audio-device") /* since 2.1.0 */
 vlc_module_end ()
 
@@ -401,6 +402,42 @@ ReportDevice(audio_output_t *p_aout, UInt32 i_id, char *name)
 }
 
 /*
+ * AudioDeviceIsAHeadphone: Checks if device is a headphone
+ */
+
+static bool
+AudioDeviceIsAHeadphone(audio_output_t *p_aout, AudioDeviceID i_dev_id)
+{
+    UInt32 defaultSize = sizeof(AudioDeviceID);
+
+    const AudioObjectPropertyAddress defaultAddr = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMaster
+    };
+
+    AudioObjectGetPropertyData(kAudioObjectSystemObject, &defaultAddr, 0, NULL, &defaultSize, &i_dev_id);
+
+    AudioObjectPropertyAddress property;
+    property.mSelector = kAudioDevicePropertyDataSource;
+    property.mScope = kAudioDevicePropertyScopeOutput;
+    property.mElement = kAudioObjectPropertyElementMaster;
+
+    UInt32 data;
+    UInt32 size = sizeof(UInt32);
+    AudioObjectGetPropertyData(i_dev_id, &property, 0, NULL, &size, &data);
+
+    /*
+     'hdpn' == headphone
+     'ispk' == internal speaker
+     '61pd' == HDMI
+     '    ' == Bluetooth accessory or AirPlay
+    */
+
+    return data == 'hdpn';
+}
+
+/*
  * AudioDeviceHasOutput: Checks if the device is actually an output device
  */
 static int
@@ -417,7 +454,7 @@ AudioDeviceHasOutput(audio_output_t *p_aout, AudioDeviceID i_dev_id)
 }
 
 static void
-RebuildDeviceList(audio_output_t * p_aout)
+RebuildDeviceList(audio_output_t * p_aout, UInt32 *p_id_exists)
 {
     struct aout_sys_t   *p_sys = p_aout->sys;
 
@@ -442,6 +479,15 @@ RebuildDeviceList(audio_output_t * p_aout)
     /* setup local array */
     CFMutableArrayRef currentListOfDevices =
         CFArrayCreateMutable(kCFAllocatorDefault, 0, &kCFTypeArrayCallBacks);
+
+    UInt32 i_id_exists;
+    if (p_id_exists)
+    {
+        i_id_exists = *p_id_exists;
+        *p_id_exists = 0;
+    }
+    else
+        i_id_exists = 0;
 
     for (size_t i = 0; i < i_devices; i++)
     {
@@ -479,6 +525,9 @@ RebuildDeviceList(audio_output_t * p_aout)
             free(psz_name);
             continue;
         }
+
+        if (p_id_exists && i_id == i_id_exists)
+            *p_id_exists = i_id;
 
         ReportDevice(p_aout, i_id, psz_name);
         CFNumberRef deviceNumber = CFNumberCreate(kCFAllocatorDefault,
@@ -640,7 +689,7 @@ StreamsChangedListener(AudioObjectID inObjectID, UInt32 inNumberAddresses,
         return 0;
 
     msg_Dbg(p_aout, "available physical formats for audio device changed");
-    RebuildDeviceList(p_aout);
+    RebuildDeviceList(p_aout, NULL);
 
     vlc_mutex_lock(&p_sys->selected_device_lock);
     /* In this case audio has not yet started. Below code will not work and is
@@ -698,7 +747,7 @@ DevicesListener(AudioObjectID inObjectID, UInt32 inNumberAddresses,
     aout_sys_t *p_sys = p_aout->sys;
 
     msg_Dbg(p_aout, "audio device configuration changed, resetting cache");
-    RebuildDeviceList(p_aout);
+    RebuildDeviceList(p_aout, NULL);
 
     vlc_mutex_lock(&p_sys->selected_device_lock);
     vlc_mutex_lock(&p_sys->device_list_lock);
@@ -850,7 +899,7 @@ SwitchAudioDevice(audio_output_t *p_aout, const char *name)
     else
         p_sys->i_new_selected_dev = 0;
 
-    p_sys->i_new_selected_dev = p_sys->i_new_selected_dev & ~AOUT_VAR_SPDIF_FLAG;
+    p_sys->i_new_selected_dev = p_sys->i_new_selected_dev;
 
     aout_DeviceReport(p_aout, name);
     aout_RestartRequest(p_aout, AOUT_RESTART_OUTPUT);
@@ -882,8 +931,7 @@ VolumeSet(audio_output_t * p_aout, float volume)
     }
 
     if (var_InheritBool(p_aout, "volume-save"))
-        config_PutInt(p_aout, "auhal-volume",
-                      lroundf(volume * AOUT_VOLUME_DEFAULT));
+        config_PutInt("auhal-volume", lroundf(volume * AOUT_VOLUME_DEFAULT));
 
     return ostatus;
 }
@@ -935,13 +983,81 @@ RenderCallbackSPDIF(AudioDeviceID inDevice, const AudioTimeStamp * inNow,
     uint8_t *p_output = outOutputData->mBuffers[p_sys->i_stream_index].mData;
     size_t i_size = outOutputData->mBuffers[p_sys->i_stream_index].mDataByteSize;
 
-    ca_Render(p_aout, p_output, i_size);
+    uint64_t i_host_time = (inNow->mFlags & kAudioTimeStampHostTimeValid)
+                         ? inNow->mHostTime : 0;
+
+    ca_Render(p_aout, 0, i_host_time, p_output, i_size);
 
     return noErr;
 }
 
 #pragma mark -
 #pragma mark initialization
+
+static void
+WarnConfiguration(audio_output_t *p_aout)
+{
+    struct aout_sys_t *p_sys = p_aout->sys;
+    char *warned_devices = var_CreateGetNonEmptyString(p_aout, "auhal-warned-devices");
+    bool dev_is_warned = false;
+    unsigned dev_count = 0;
+
+    /* Check if the actual device was already warned */
+    if (warned_devices)
+    {
+        char *dup = strdup(warned_devices);
+        if (dup)
+        {
+            char *savetpr;
+            for (const char *dev = strtok_r(dup, ";", &savetpr);
+                 dev != NULL && !dev_is_warned;
+                 dev = strtok_r(NULL, ";", &savetpr))
+            {
+                dev_count++;
+                int devid = atoi(dev);
+                if (devid >= 0 && (unsigned) devid == p_sys->i_selected_dev)
+                {
+                    dev_is_warned = true;
+                    break;
+                }
+            }
+            free(dup);
+        }
+    }
+
+    /* Warn only one time per device */
+    if (!dev_is_warned)
+    {
+        msg_Warn(p_aout, "You should configure your speaker layout with "
+                "Audio Midi Setup in /Applications/Utilities. VLC will "
+                "output Stereo only.");
+        vlc_dialog_display_error(p_aout,
+            _("Audio device is not configured"), "%s",
+            _("You should configure your speaker layout with "
+            "\"Audio Midi Setup\" in /Applications/"
+            "Utilities. VLC will output Stereo only."));
+
+        /* Don't save too many devices */
+        if (dev_count >= 10)
+        {
+            char *end = strrchr(warned_devices, ';');
+            if (end)
+                *end = 0;
+        }
+
+        /* Add the actual device to the list of warned devices */
+        char *new_warned_devices;
+        if (asprintf(&new_warned_devices, "%u%s%s", p_sys->i_selected_dev,
+                     warned_devices ? ";" : "",
+                     warned_devices ? warned_devices : "") != -1)
+        {
+            config_PutPsz("auhal-warned-devices", new_warned_devices);
+            var_SetString(p_aout, "auhal-warned-devices", new_warned_devices);
+            free(new_warned_devices);
+        }
+    }
+    free(warned_devices);
+}
 
 /*
  * StartAnalog: open and setup a HAL AudioUnit to do PCM audio output
@@ -961,6 +1077,8 @@ StartAnalog(audio_output_t *p_aout, audio_sample_format_t *fmt,
     p_sys->au_unit = au_NewOutputInstance(p_aout, kAudioUnitSubType_HALOutput);
     if (p_sys->au_unit == NULL)
         return VLC_EGENERIC;
+
+    p_aout->current_sink_info.headphones = AudioDeviceIsAHeadphone(p_aout, p_sys->i_selected_dev);
 
     /* Set the device we will use for this output unit */
     err = AudioUnitSetProperty(p_sys->au_unit,
@@ -999,7 +1117,9 @@ StartAnalog(audio_output_t *p_aout, audio_sample_format_t *fmt,
                    "kAudioDevicePropertyPreferredChannelLayout - using stereo");
 
     /* Do the last VLC aout setups */
-    int ret = au_Initialize(p_aout, p_sys->au_unit, fmt, layout, i_latency_us);
+    bool warn_configuration;
+    int ret = au_Initialize(p_aout, p_sys->au_unit, fmt, layout, i_latency_us,
+                            &warn_configuration);
     if (ret != VLC_SUCCESS)
         goto error;
 
@@ -1016,6 +1136,10 @@ StartAnalog(audio_output_t *p_aout, audio_sample_format_t *fmt,
     MuteSet(p_aout, p_sys->b_mute);
 
     free(layout);
+
+    if (warn_configuration)
+        WarnConfiguration(p_aout);
+
     return VLC_SUCCESS;
 error:
     AudioComponentInstanceDispose(p_sys->au_unit);
@@ -1400,7 +1524,20 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
     p_sys->b_changed_mixing = false;
 
     vlc_mutex_lock(&p_sys->selected_device_lock);
-    p_sys->i_selected_dev = p_sys->i_new_selected_dev;
+    bool do_spdif;
+    if (AOUT_FMT_SPDIF (fmt))
+    {
+        if (!(p_sys->i_new_selected_dev & AOUT_VAR_SPDIF_FLAG))
+        {
+            vlc_mutex_unlock(&p_sys->selected_device_lock);
+            return VLC_EGENERIC;
+        }
+        do_spdif = true;
+    }
+    else
+        do_spdif = false;
+
+    p_sys->i_selected_dev = p_sys->i_new_selected_dev & ~AOUT_VAR_SPDIF_FLAG;
 
     aout_FormatPrint(p_aout, "VLC is looking for:", fmt);
 
@@ -1475,7 +1612,7 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
     mtime_t i_latency_us = i_latency_samples * CLOCK_FREQ / fmt->i_rate;
 
     /* Check for Digital mode or Analog output mode */
-    if (AOUT_FMT_SPDIF (fmt))
+    if (do_spdif)
     {
         if (StartSPDIF (p_aout, fmt, i_latency_us) == VLC_SUCCESS)
         {
@@ -1488,6 +1625,7 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
         if (StartAnalog(p_aout, fmt, i_latency_us) == VLC_SUCCESS)
         {
             msg_Dbg(p_aout, "analog output successfully opened");
+            fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
             return VLC_SUCCESS;
         }
     }
@@ -1547,12 +1685,13 @@ static void Close(vlc_object_t *obj)
     CFRelease(p_sys->device_list);
 
     char *psz_device = aout_DeviceGet(p_aout);
-    config_PutPsz(p_aout, "auhal-audio-device", psz_device);
+    config_PutPsz("auhal-audio-device", psz_device);
     free(psz_device);
 
     vlc_mutex_destroy(&p_sys->selected_device_lock);
     vlc_mutex_destroy(&p_sys->device_list_lock);
 
+    ca_Close(p_aout);
     free(p_sys);
 }
 
@@ -1603,7 +1742,24 @@ static int Open(vlc_object_t *obj)
                       kAudioHardwarePropertyDefaultOutputDevice,
                       kAudioObjectPropertyScopeGlobal);
 
-    RebuildDeviceList(p_aout);
+    char *psz_audio_device = var_InheritString(p_aout, "auhal-audio-device");
+    if (psz_audio_device != NULL)
+    {
+        int dev_id_int = atoi(psz_audio_device);
+        UInt32 dev_id = dev_id_int < 0 ? 0 : dev_id_int;
+        RebuildDeviceList(p_aout, &dev_id);
+        p_sys->i_new_selected_dev = dev_id;
+        free(psz_audio_device);
+    }
+    else
+    {
+        RebuildDeviceList(p_aout, NULL);
+        p_sys->i_new_selected_dev = 0;
+    }
+
+    char deviceid[10];
+    sprintf(deviceid, "%i", p_sys->i_new_selected_dev);
+    aout_DeviceReport(p_aout, deviceid);
 
     /* remember the volume */
     p_sys->f_volume = var_InheritInteger(p_aout, "auhal-volume")
@@ -1612,9 +1768,6 @@ static int Open(vlc_object_t *obj)
     p_sys->b_mute = var_InheritBool(p_aout, "mute");
     aout_MuteReport(p_aout, p_sys->b_mute);
 
-    char *psz_audio_device = var_InheritString(p_aout, "auhal-audio-device");
-    SwitchAudioDevice(p_aout, psz_audio_device);
-    free(psz_audio_device);
-
+    ca_Open(p_aout);
     return VLC_SUCCESS;
 }

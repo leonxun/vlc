@@ -378,7 +378,6 @@ static int vlm_MediaVodControl( void *p_private, vod_media_t *p_vod_media,
 static void* Manage( void* p_object )
 {
     vlm_t *vlm = (vlm_t*)p_object;
-    int j;
     time_t lastcheck, now, nextschedule = 0;
 
     time(&lastcheck);
@@ -409,7 +408,7 @@ static void* Manage( void* p_object )
         {
             vlm_media_sys_t *p_media = vlm->media[i];
 
-            for( j = 0; j < p_media->i_instance; )
+            for( int j = 0; j < p_media->i_instance; )
             {
                 vlm_media_instance_sys_t *p_instance = p_media->instance[j];
                 int state = INIT_S;
@@ -474,7 +473,7 @@ static void* Manage( void* p_object )
                 {
                     if( real_date > lastcheck )
                     {
-                        for( j = 0; j < vlm->schedule[i]->i_command; j++ )
+                        for( int j = 0; j < vlm->schedule[i]->i_command; j++ )
                         {
                             TAB_APPEND( i_scheduled_commands,
                                         ppsz_scheduled_commands,
@@ -625,7 +624,7 @@ static int vlm_OnMediaUpdate( vlm_t *p_vlm, vlm_media_sys_t *p_media )
             sout_description_data_t data;
             TAB_INIT(data.i_es, data.es);
 
-            p_input = input_Create( p_vlm->p_vod, p_media->vod.p_item, psz_header, NULL );
+            p_input = input_Create( p_vlm->p_vod, p_media->vod.p_item, psz_header, NULL, NULL );
             if( p_input )
             {
                 vlc_sem_t sem_preparse;
@@ -654,6 +653,7 @@ static int vlm_OnMediaUpdate( vlm_t *p_vlm, vlm_media_sys_t *p_media )
 
             /* XXX: Don't do it that way, but properly use a new input item ref. */
             input_item_t item = *p_media->vod.p_item;;
+            es_format_t es, *p_es = &es;
             if( p_cfg->vod.psz_mux )
             {
                 const char *psz_mux;
@@ -664,7 +664,6 @@ static int vlm_OnMediaUpdate( vlm_t *p_vlm, vlm_media_sys_t *p_media )
                 else
                     psz_mux = p_cfg->vod.psz_mux;
 
-                es_format_t es, *p_es = &es;
                 union {
                     char text[5];
                     unsigned char utext[5];
@@ -737,7 +736,7 @@ static int vlm_ControlMediaAdd( vlm_t *p_vlm, vlm_media_t *p_cfg, int64_t *p_id 
     {
         p_vlm->p_vod = vlc_custom_create( VLC_OBJECT(p_vlm), sizeof( vod_t ),
                                           "vod server" );
-        p_vlm->p_vod->p_module = module_need( p_vlm->p_vod, "vod server", "$vod-server", false );
+        p_vlm->p_vod->p_module = module_need_var( p_vlm->p_vod, "vod server", "vod-server" );
         if( !p_vlm->p_vod->p_module )
         {
             msg_Err( p_vlm, "cannot find vod server" );
@@ -999,7 +998,8 @@ static int vlm_ControlMediaInstanceStart( vlm_t *p_vlm, int64_t id, const char *
     {
         p_instance->p_input = input_Create( p_instance->p_parent,
                                             p_instance->p_item, psz_log,
-                                            p_instance->p_input_resource );
+                                            p_instance->p_input_resource,
+                                            NULL );
         if( p_instance->p_input )
         {
             var_AddCallback( p_instance->p_input, "intf-event", InputEvent, p_media );

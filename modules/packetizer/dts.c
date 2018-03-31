@@ -102,11 +102,10 @@ static block_t *GetOutBuffer( decoder_t *p_dec )
         p_dec->fmt_out.audio.i_bytes_per_frame = p_sys->dts.i_frame_size;
     p_dec->fmt_out.audio.i_frame_length = p_sys->dts.i_frame_length;
 
-    p_dec->fmt_out.audio.i_original_channels = p_sys->dts.i_original_channels;
-    p_dec->fmt_out.audio.i_physical_channels = 
-        p_sys->dts.i_original_channels & AOUT_CHAN_PHYSMASK;
+    p_dec->fmt_out.audio.i_chan_mode = p_sys->dts.i_chan_mode;
+    p_dec->fmt_out.audio.i_physical_channels = p_sys->dts.i_physical_channels;
     p_dec->fmt_out.audio.i_channels =
-        popcount( p_dec->fmt_out.audio.i_physical_channels );
+        vlc_popcount( p_dec->fmt_out.audio.i_physical_channels );
 
     p_dec->fmt_out.i_bitrate = p_sys->dts.i_bitrate;
 
@@ -176,6 +175,7 @@ static block_t *PacketizeBlock( decoder_t *p_dec, block_t **pp_block )
                 /* Need more data */
                 return NULL;
             }
+            /* fallthrough */
 
         case STATE_SYNC:
             /* New frame, set the Presentation Time Stamp */
@@ -186,6 +186,7 @@ static block_t *PacketizeBlock( decoder_t *p_dec, block_t **pp_block )
                 date_Set( &p_sys->end_date, p_sys->i_pts );
             }
             p_sys->i_state = STATE_HEADER;
+            /* fallthrough */
 
         case STATE_HEADER:
             /* Get DTS frame header (VLC_DTS_HEADER_SIZE bytes) */
@@ -219,6 +220,7 @@ static block_t *PacketizeBlock( decoder_t *p_dec, block_t **pp_block )
 
             p_sys->i_input_size = p_sys->i_next_offset = p_sys->dts.i_frame_size;
             p_sys->i_state = STATE_NEXT_SYNC;
+            /* fallthrough */
 
         case STATE_NEXT_SYNC:
             /* Check if next expected frame contains the sync word */
@@ -274,6 +276,7 @@ static block_t *PacketizeBlock( decoder_t *p_dec, block_t **pp_block )
                                               VLC_DTS_HEADER_SIZE )
                         == VLC_SUCCESS && next_header.b_substream )
                     {
+                        p_dec->fmt_out.i_profile = PROFILE_DTS_HD;
                         p_sys->i_input_size += next_header.i_frame_size;
                     }
                 }
@@ -290,6 +293,7 @@ static block_t *PacketizeBlock( decoder_t *p_dec, block_t **pp_block )
                 return NULL;
             }
             p_sys->i_state = STATE_SEND_DATA;
+            /* fallthrough */
 
         case STATE_SEND_DATA:
             if( !(p_out_buffer = GetOutBuffer( p_dec )) )
@@ -338,13 +342,8 @@ static int Open( vlc_object_t *p_this )
     decoder_t *p_dec = (decoder_t*)p_this;
     decoder_sys_t *p_sys;
 
-    switch( p_dec->fmt_in.i_codec )
-    {
-        case VLC_CODEC_DTS:
-            break;
-        default:
-            return VLC_EGENERIC;
-    }
+    if( p_dec->fmt_in.i_codec != VLC_CODEC_DTS )
+        return VLC_EGENERIC;
 
     /* Allocate the memory needed to store the decoder's structure */
     if( ( p_dec->p_sys = p_sys = malloc(sizeof(decoder_sys_t)) ) == NULL )
@@ -360,7 +359,6 @@ static int Open( vlc_object_t *p_this )
     block_BytestreamInit( &p_sys->bytestream );
 
     /* Set output properties (passthrough only) */
-    p_dec->fmt_out.i_cat = AUDIO_ES;
     p_dec->fmt_out.i_codec = p_dec->fmt_in.i_codec;
     p_dec->fmt_out.audio = p_dec->fmt_in.audio;
 

@@ -30,8 +30,9 @@
 # include "config.h"
 #endif
 
+#include <stdatomic.h>
+
 #include <vlc_common.h>
-#include <vlc_atomic.h>
 #include <vlc_services_discovery.h>
 #include <bdsm/bdsm.h>
 
@@ -68,7 +69,7 @@ static void entry_item_append( services_discovery_t *p_sd,
     p_entry_item->p_entry = p_entry;
     p_entry_item->p_item = p_item;
     input_item_Hold( p_item );
-    vlc_array_append( &p_sys->entry_item_list, p_entry_item );
+    vlc_array_append_or_abort( &p_sys->entry_item_list, p_entry_item );
     services_discovery_AddItem( p_sd, p_item );
 }
 

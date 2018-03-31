@@ -46,12 +46,14 @@
 #include <vlc_spu.h>
 #include <vlc_vout_osd.h>
 #include <vlc_image.h>
+#include <vlc_plugin.h>
 
 #include <libvlc.h>
 #include "vout_internal.h"
 #include "interlacing.h"
 #include "display.h"
 #include "window.h"
+#include "../misc/variables.h"
 
 /*****************************************************************************
  * Local prototypes
@@ -148,7 +150,7 @@ static vout_thread_t *VoutCreate(vlc_object_t *object,
     vout_IntfInit(vout);
 
     /* Initialize subpicture unit */
-    vout->p->spu = spu_Create(vout);
+    vout->p->spu = spu_Create(vout, vout);
 
     vout->p->title.show     = var_InheritBool(vout, "video-title-show");
     vout->p->title.timeout  = var_InheritInteger(vout, "video-title-timeout");
@@ -378,7 +380,7 @@ void vout_PutSubpicture( vout_thread_t *vout, subpicture_t *subpic )
 }
 int vout_RegisterSubpictureChannel( vout_thread_t *vout )
 {
-    int channel = SPU_DEFAULT_CHANNEL;
+    int channel = VOUT_SPU_CHANNEL_AVAIL_FIRST;
 
     vlc_mutex_lock(&vout->p->spu_lock);
     if (vout->p->spu)
@@ -423,9 +425,19 @@ picture_t *vout_GetPicture(vout_thread_t *vout)
 void vout_PutPicture(vout_thread_t *vout, picture_t *picture)
 {
     picture->p_next = NULL;
-    picture_fifo_Push(vout->p->decoder_fifo, picture);
+    if (picture_pool_OwnsPic(vout->p->decoder_pool, picture))
+    {
+        picture_fifo_Push(vout->p->decoder_fifo, picture);
 
-    vout_control_Wake(&vout->p->control);
+        vout_control_Wake(&vout->p->control);
+    }
+    else
+    {
+        /* FIXME: HACK: Drop this picture because the vout changed. The old
+         * picture pool need to be kept by the new vout. This requires a major
+         * "vout display" API change. */
+        picture_Release(picture);
+    }
 }
 
 /* */
@@ -558,18 +570,12 @@ void vout_ControlChangeViewpoint(vout_thread_t *vout,
 static void VoutGetDisplayCfg(vout_thread_t *vout, vout_display_cfg_t *cfg, const char *title)
 {
     /* Load configuration */
+#if defined(_WIN32) || defined(__OS2__)
     cfg->is_fullscreen = var_GetBool(vout, "fullscreen")
                          || var_GetBool(vout, "video-wallpaper");
-    const vlc_viewpoint_t *p_viewpoint = var_GetAddress(vout, "viewpoint");
-    if (p_viewpoint != NULL)
-        cfg->viewpoint = *p_viewpoint;
-    else
-    {
-        cfg->viewpoint.yaw   = vout->p->original.pose.f_yaw_degrees;
-        cfg->viewpoint.pitch = vout->p->original.pose.f_pitch_degrees;
-        cfg->viewpoint.roll  = vout->p->original.pose.f_roll_degrees;
-        cfg->viewpoint.fov   = vout->p->original.pose.f_fov_degrees;
-    }
+#endif
+    cfg->viewpoint = vout->p->original.pose;
+
     cfg->display.title = title;
     const int display_width = var_GetInteger(vout, "width");
     const int display_height = var_GetInteger(vout, "height");
@@ -649,6 +655,29 @@ int vout_HideWindowMouse(vout_thread_t *vout, bool hide)
 }
 
 /* */
+static int FilterRestartCallback(vlc_object_t *p_this, char const *psz_var,
+                                 vlc_value_t oldval, vlc_value_t newval,
+                                 void *p_data)
+{
+    (void) p_this; (void) psz_var; (void) oldval; (void) newval;
+    vout_ControlChangeFilters((vout_thread_t *)p_data, NULL);
+    return 0;
+}
+
+static int ThreadDelFilterCallbacks(filter_t *filter, void *opaque)
+{
+    filter_DelProxyCallbacks((vlc_object_t *)opaque, filter,
+                             FilterRestartCallback);
+    return VLC_SUCCESS;
+}
+
+static void ThreadDelAllFilterCallbacks(vout_thread_t *vout)
+{
+    assert(vout->p->filter.chain_interactive != NULL);
+    filter_chain_ForEach(vout->p->filter.chain_interactive,
+                         ThreadDelFilterCallbacks, vout);
+}
+
 static picture_t *VoutVideoFilterInteractiveNewPicture(filter_t *filter)
 {
     vout_thread_t *vout = filter->owner.sys;
@@ -666,7 +695,7 @@ static picture_t *VoutVideoFilterStaticNewPicture(filter_t *filter)
     vout_thread_t *vout = filter->owner.sys;
 
     vlc_assert_locked(&vout->p->filter.lock);
-    if (filter_chain_GetLength(vout->p->filter.chain_interactive) == 0)
+    if (filter_chain_IsEmpty(vout->p->filter.chain_interactive))
         return VoutVideoFilterInteractiveNewPicture(filter);
 
     return picture_NewFromFormat(&filter->fmt_out.video);
@@ -702,6 +731,7 @@ static void ThreadChangeFilters(vout_thread_t *vout,
                                 bool is_locked)
 {
     ThreadFilterFlush(vout, is_locked);
+    ThreadDelAllFilterCallbacks(vout);
 
     vlc_array_t array_static;
     vlc_array_t array_interactive;
@@ -717,7 +747,7 @@ static void ThreadChangeFilters(vout_thread_t *vout,
         if (likely(e))
         {
             free(config_ChainCreate(&e->name, &e->cfg, "deinterlace"));
-            vlc_array_append(&array_static, e);
+            vlc_array_append_or_abort(&array_static, e);
         }
     }
 
@@ -734,9 +764,9 @@ static void ThreadChangeFilters(vout_thread_t *vout,
                 e->name = name;
                 e->cfg  = cfg;
                 if (!strcmp(e->name, "postproc"))
-                    vlc_array_append(&array_static, e);
+                    vlc_array_append_or_abort(&array_static, e);
                 else
-                    vlc_array_append(&array_interactive, e);
+                    vlc_array_append_or_abort(&array_interactive, e);
             }
             else {
                 if (cfg)
@@ -758,7 +788,7 @@ static void ThreadChangeFilters(vout_thread_t *vout,
     es_format_t fmt_target;
     es_format_InitFromVideo(&fmt_target, source ? source : &vout->p->filter.format);
 
-    es_format_t fmt_current = fmt_target;
+    const es_format_t *p_fmt_current = &fmt_target;
 
     for (int a = 0; a < 2; a++) {
         vlc_array_t    *array = a == 0 ? &array_static :
@@ -766,26 +796,33 @@ static void ThreadChangeFilters(vout_thread_t *vout,
         filter_chain_t *chain = a == 0 ? vout->p->filter.chain_static :
                                          vout->p->filter.chain_interactive;
 
-        filter_chain_Reset(chain, &fmt_current, &fmt_current);
+        filter_chain_Reset(chain, p_fmt_current, p_fmt_current);
         for (size_t i = 0; i < vlc_array_count(array); i++) {
             vout_filter_t *e = vlc_array_item_at_index(array, i);
             msg_Dbg(vout, "Adding '%s' as %s", e->name, a == 0 ? "static" : "interactive");
-            if (!filter_chain_AppendFilter(chain, e->name, e->cfg, NULL, NULL)) {
+            filter_t *filter = filter_chain_AppendFilter(chain, e->name, e->cfg,
+                               NULL, NULL);
+            if (!filter)
+            {
                 msg_Err(vout, "Failed to add filter '%s'", e->name);
                 config_ChainDestroy(e->cfg);
             }
+            else if (a == 1) /* Add callbacks for interactive filters */
+                filter_AddProxyCallbacks(vout, filter, FilterRestartCallback);
+
             free(e->name);
             free(e);
         }
-        fmt_current = *filter_chain_GetFmtOut(chain);
+        p_fmt_current = filter_chain_GetFmtOut(chain);
         vlc_array_clear(array);
     }
 
-    if (!es_format_IsSimilar(&fmt_current, &fmt_target)) {
+    if (!es_format_IsSimilar(p_fmt_current, &fmt_target)) {
         msg_Dbg(vout, "Adding a filter to compensate for format changes");
         if (filter_chain_AppendConverter(vout->p->filter.chain_interactive,
-                                         &fmt_current, &fmt_target) != 0) {
+                                         p_fmt_current, &fmt_target) != 0) {
             msg_Err(vout, "Failed to compensate for the format changes, removing all filters");
+            ThreadDelAllFilterCallbacks(vout);
             filter_chain_Reset(vout->p->filter.chain_static,      &fmt_target, &fmt_target);
             filter_chain_Reset(vout->p->filter.chain_interactive, &fmt_target, &fmt_target);
         }
@@ -825,9 +862,14 @@ static int ThreadDisplayPreparePicture(vout_thread_t *vout, bool reuse, bool fra
             decoded = picture_fifo_Pop(vout->p->decoder_fifo);
             if (decoded) {
                 if (is_late_dropped && !decoded->b_force) {
+                    mtime_t late_threshold;
+                    if (decoded->format.i_frame_rate && decoded->format.i_frame_rate_base)
+                        late_threshold = ((CLOCK_FREQ/2) * decoded->format.i_frame_rate_base) / decoded->format.i_frame_rate;
+                    else
+                        late_threshold = VOUT_DISPLAY_LATE_THRESHOLD;
                     const mtime_t predicted = mdate() + 0; /* TODO improve */
                     const mtime_t late = predicted - decoded->date;
-                    if (late > VOUT_DISPLAY_LATE_THRESHOLD) {
+                    if (late > late_threshold) {
                         msg_Warn(vout, "picture is too late to be displayed (missing %"PRId64" ms)", late/1000);
                         picture_Release(decoded);
                         vout_statistic_AddLost(&vout->p->statistic, 1);
@@ -866,6 +908,60 @@ static int ThreadDisplayPreparePicture(vout_thread_t *vout, bool reuse, bool fra
     else
         vout->p->displayed.next    = picture;
     return VLC_SUCCESS;
+}
+
+static picture_t *ConvertRGB32AndBlendBufferNew(filter_t *filter)
+{
+    return picture_NewFromFormat(&filter->fmt_out.video);
+}
+
+static picture_t *ConvertRGB32AndBlend(vout_thread_t *vout, picture_t *pic,
+                                     subpicture_t *subpic)
+{
+    /* This function will convert the pic to RGB32 and blend the subpic to it.
+     * The returned pic can't be used to display since the chroma will be
+     * different than the "vout display" one, but it can be used for snapshots.
+     * */
+
+    assert(vout->p->spu_blend);
+
+    filter_owner_t owner = {
+        .video = {
+            .buffer_new = ConvertRGB32AndBlendBufferNew,
+        },
+    };
+    filter_chain_t *filterc = filter_chain_NewVideo(vout, false, &owner);
+    if (!filterc)
+        return NULL;
+
+    es_format_t src = vout->p->spu_blend->fmt_out;
+    es_format_t dst = src;
+    dst.video.i_chroma = VLC_CODEC_RGB32;
+    video_format_FixRgb(&dst.video);
+
+    if (filter_chain_AppendConverter(filterc, &src, &dst) != 0)
+    {
+        filter_chain_Delete(filterc);
+        return NULL;
+    }
+
+    picture_Hold(pic);
+    pic = filter_chain_VideoFilter(filterc, pic);
+    filter_chain_Delete(filterc);
+
+    if (pic)
+    {
+        filter_t *swblend = filter_NewBlend(VLC_OBJECT(vout), &dst.video);
+        if (swblend)
+        {
+            bool success = picture_BlendSubpicture(pic, swblend, subpic) > 0;
+            filter_DeleteBlend(swblend);
+            if (success)
+                return pic;
+        }
+        picture_Release(pic);
+    }
+    return NULL;
 }
 
 static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
@@ -914,7 +1010,6 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
                               (vd->info.is_slow ||
                                sys->display.use_dr ||
                                do_snapshot ||
-                               !vout_IsDisplayFiltered(vd) ||
                                vd->fmt.i_width * vd->fmt.i_height <= vd->source.i_width * vd->source.i_height);
 
     const vlc_fourcc_t *subpicture_chromas;
@@ -973,6 +1068,7 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
      */
     bool is_direct = vout->p->decoder_pool == vout->p->display_pool;
     picture_t *todisplay = filtered;
+    picture_t *snap_pic = todisplay;
     if (do_early_spu && subpic) {
         if (vout->p->spu_blend) {
             picture_t *blent = picture_pool_Get(vout->p->private_pool);
@@ -981,9 +1077,20 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
                 picture_Copy(blent, filtered);
                 if (picture_BlendSubpicture(blent, vout->p->spu_blend, subpic)) {
                     picture_Release(todisplay);
-                    todisplay = blent;
+                    snap_pic = todisplay = blent;
                 } else
+                {
+                    /* Blending failed, likely because the picture is opaque or
+                     * read-only. Try to convert the opaque picture to a
+                     * software RGB32 one before blending it. */
+                    if (do_snapshot)
+                    {
+                        picture_t *copy = ConvertRGB32AndBlend(vout, blent, subpic);
+                        if (copy)
+                            snap_pic = copy;
+                    }
                     picture_Release(blent);
+                }
             }
         }
         subpicture_Delete(subpic);
@@ -1009,28 +1116,33 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
         VideoFormatCopyCropAr(&direct->format, &todisplay->format);
         picture_Copy(direct, todisplay);
         picture_Release(todisplay);
-        todisplay = direct;
+        snap_pic = todisplay = direct;
     }
 
     /*
      * Take a snapshot if requested
      */
     if (do_snapshot)
-        vout_snapshot_Set(&vout->p->snapshot, &vd->source, todisplay);
+    {
+        assert(snap_pic);
+        vout_snapshot_Set(&vout->p->snapshot, &vd->source, snap_pic);
+        if (snap_pic != todisplay)
+            picture_Release(snap_pic);
+    }
 
     /* Render the direct buffer */
     vout_UpdateDisplaySourceProperties(vd, &todisplay->format);
+
+    todisplay = vout_FilterDisplay(vd, todisplay);
+    if (todisplay == NULL) {
+        if (subpic != NULL)
+            subpicture_Delete(subpic);
+        return VLC_EGENERIC;
+    }
+
     if (sys->display.use_dr) {
         vout_display_Prepare(vd, todisplay, subpic);
     } else {
-        todisplay = vout_FilterDisplay(vd, todisplay);
-        if (todisplay == NULL)
-        {
-            if (subpic != NULL)
-                subpicture_Delete(subpic);
-            return VLC_EGENERIC;
-        }
-
         if (!do_dr_spu && !do_early_spu && vout->p->spu_blend && subpic)
             picture_BlendSubpicture(todisplay, vout->p->spu_blend, subpic);
         vout_display_Prepare(vd, todisplay, do_dr_spu ? subpic : NULL);
@@ -1054,7 +1166,7 @@ static int ThreadDisplayRenderPicture(vout_thread_t *vout, bool is_forced)
 
     /* Wait the real date (for rendering jitter) */
 #if 0
-    mtime_t delay = direct->date - mdate();
+    mtime_t delay = todisplay->date - mdate();
     if (delay < 1000)
         msg_Warn(vout, "picture is late (%lld ms)", delay / 1000);
 #endif
@@ -1154,7 +1266,7 @@ static void ThreadDisplayOsdTitle(vout_thread_t *vout, const char *string)
     if (!vout->p->title.show)
         return;
 
-    vout_OSDText(vout, SPU_DEFAULT_CHANNEL,
+    vout_OSDText(vout, VOUT_SPU_CHANNEL_OSD,
                  vout->p->title.position, INT64_C(1000) * vout->p->title.timeout,
                  string);
 }
@@ -1197,6 +1309,10 @@ static void ThreadChangePause(vout_thread_t *vout, bool is_paused, mtime_t date)
     }
     vout->p->pause.is_on = is_paused;
     vout->p->pause.date  = date;
+
+    vout_window_t *window = vout->p->window;
+    if (window != NULL)
+        vout_window_SetInhibition(window, !is_paused);
 }
 
 static void ThreadFlush(vout_thread_t *vout, bool below, mtime_t date)
@@ -1219,6 +1335,7 @@ static void ThreadFlush(vout_thread_t *vout, bool below, mtime_t date)
     }
 
     picture_fifo_Flush(vout->p->decoder_fifo, date, below);
+    vout_FilterFlush(vout->p->display.vd);
 }
 
 static void ThreadStep(vout_thread_t *vout, mtime_t *duration)
@@ -1245,12 +1362,18 @@ static void ThreadChangeFullscreen(vout_thread_t *vout, bool fullscreen)
 {
     vout_window_t *window = vout->p->window;
 
+#if !defined(_WIN32) && !defined(__OS2__)
     if (window != NULL)
         vout_window_SetFullScreen(window, fullscreen);
-    else
+#else
+    bool window_fullscreen = false;
+    if (window != NULL
+     && vout_window_SetFullScreen(window, fullscreen) == VLC_SUCCESS)
+        window_fullscreen = true;
+    /* FIXME: remove this event */
     if (vout->p->display.vd != NULL)
-        vout_display_SendEvent(vout->p->display.vd,
-                               VOUT_DISPLAY_EVENT_FULLSCREEN, fullscreen);
+        vout_display_SendEventFullscreen(vout->p->display.vd, fullscreen, window_fullscreen);
+#endif
 }
 
 static void ThreadChangeWindowState(vout_thread_t *vout, unsigned state)
@@ -1262,8 +1385,7 @@ static void ThreadChangeWindowState(vout_thread_t *vout, unsigned state)
 #if defined(_WIN32) || defined(__OS2__)
     else /* FIXME: remove this event */
     if (vout->p->display.vd != NULL)
-        vout_display_SendEvent(vout->p->display.vd,
-                               VOUT_DISPLAY_EVENT_WINDOW_STATE, state);
+        vout_display_SendWindowState(vout->p->display.vd, state);
 #endif
 }
 
@@ -1302,7 +1424,8 @@ static void ThreadChangeWindowMouse(vout_thread_t *vout,
             vout_display_SendEventMouseReleased(vd, mouse->button_mask);
             break;
         case VOUT_WINDOW_MOUSE_DOUBLE_CLICK:
-            vout_display_SendEventMouseDoubleClick(vd);
+            if (mouse->button_mask == 0)
+                vout_display_SendEventMouseDoubleClick(vd);
             break;
         default: vlc_assert_unreachable();
             break;
@@ -1344,7 +1467,7 @@ static void ThreadExecuteCropBorder(vout_thread_t *vout,
                                     unsigned left, unsigned top,
                                     unsigned right, unsigned bottom)
 {
-    msg_Err(vout, "ThreadExecuteCropBorder %d.%d %dx%d", left, top, right, bottom);
+    msg_Dbg(vout, "ThreadExecuteCropBorder %d.%d %dx%d", left, top, right, bottom);
     vout_SetDisplayCrop(vout->p->display.vd, 0, 0,
                         left, top, -(int)right, -(int)bottom);
 }
@@ -1430,7 +1553,10 @@ static int ThreadStart(vout_thread_t *vout, vout_display_state_t *state)
     return VLC_SUCCESS;
 error:
     if (vout->p->filter.chain_interactive != NULL)
+    {
+        ThreadDelAllFilterCallbacks(vout);
         filter_chain_Delete(vout->p->filter.chain_interactive);
+    }
     if (vout->p->filter.chain_static != NULL)
         filter_chain_Delete(vout->p->filter.chain_static);
     video_format_Clean(&vout->p->filter.format);
@@ -1453,7 +1579,8 @@ static void ThreadStop(vout_thread_t *vout, vout_display_state_t *state)
         vout_CloseWrapper(vout, state);
     }
 
-    /* Destroy the video filters2 */
+    /* Destroy the video filters */
+    ThreadDelAllFilterCallbacks(vout);
     filter_chain_Delete(vout->p->filter.chain_interactive);
     filter_chain_Delete(vout->p->filter.chain_static);
     video_format_Clean(&vout->p->filter.format);
@@ -1494,8 +1621,12 @@ static int ThreadReinit(vout_thread_t *vout,
         ThreadClean(vout);
         return VLC_EGENERIC;
     }
-    /* We ignore crop/ar changes at this point, they are dynamically supported */
-    VideoFormatCopyCropAr(&vout->p->original, &original);
+
+    /* We ignore ar changes at this point, they are dynamically supported.
+     * #19268: don't ignore crop changes (fix vouts using the crop size of the
+     * previous format). */
+    vout->p->original.i_sar_num = original.i_sar_num;
+    vout->p->original.i_sar_den = original.i_sar_den;
     if (video_format_IsSimilar(&original, &vout->p->original)) {
         if (cfg->dpb_size <= vout->p->dpb_size) {
             video_format_Clean(&original);
@@ -1511,7 +1642,10 @@ static int ThreadReinit(vout_thread_t *vout,
 
     vout_ReinitInterlacingSupport(vout);
 
-    if (!state.cfg.is_fullscreen) {
+#if defined(_WIN32) || defined(__OS2__)
+    if (!state.cfg.is_fullscreen)
+#endif
+    {
         state.cfg.display.width  = 0;
         state.cfg.display.height = 0;
     }
@@ -1576,7 +1710,10 @@ static int ThreadControl(vout_thread_t *vout, vout_control_cmd_t cmd)
         ThreadDisplayOsdTitle(vout, cmd.u.string);
         break;
     case VOUT_CONTROL_CHANGE_FILTERS:
-        ThreadChangeFilters(vout, NULL, cmd.u.string, -1, false);
+        ThreadChangeFilters(vout, NULL,
+                            cmd.u.string != NULL ?
+                            cmd.u.string : vout->p->filter.configuration,
+                            -1, false);
         break;
     case VOUT_CONTROL_CHANGE_INTERLACE:
         ThreadChangeFilters(vout, NULL, vout->p->filter.configuration,

@@ -16,6 +16,10 @@ libgain_plugin_la_SOURCES = audio_filter/gain.c
 libparam_eq_plugin_la_SOURCES = audio_filter/param_eq.c
 libparam_eq_plugin_la_LIBADD = $(LIBM)
 libscaletempo_plugin_la_SOURCES = audio_filter/scaletempo.c
+libscaletempo_plugin_la_LIBADD = $(LIBM)
+libscaletempo_pitch_plugin_la_SOURCES = $(libscaletempo_plugin_la_SOURCES)
+libscaletempo_pitch_plugin_la_LIBADD = $(libscaletempo_plugin_la_LIBADD)
+libscaletempo_pitch_plugin_la_CFLAGS = $(AM_CFLAGS) -DPITCH_SHIFTER
 libstereo_widen_plugin_la_SOURCES = audio_filter/stereo_widen.c
 libspatializer_plugin_la_SOURCES = \
 	audio_filter/spatializer/allpass.cpp \
@@ -40,6 +44,7 @@ audio_filter_LTLIBRARIES = \
 	libgain_plugin.la \
 	libparam_eq_plugin.la \
 	libscaletempo_plugin.la \
+	libscaletempo_pitch_plugin.la \
 	libspatializer_plugin.la \
 	libstereo_widen_plugin.la
 
@@ -74,6 +79,15 @@ audio_filter_LTLIBRARIES += \
 	libremap_plugin.la \
 	libsimple_channel_mixer_plugin.la \
 	libtrivial_channel_mixer_plugin.la
+
+# Spatial audio: ambisonics / binaural
+libspatialaudio_plugin_la_SOURCES = \
+	audio_filter/channel_mixer/spatialaudio.cpp
+libspatialaudio_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(SPATIALAUDIO_CFLAGS)
+libspatialaudio_plugin_la_LIBADD = $(SPATIALAUDIO_LIBS)
+libspatialaudio_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(audio_filterdir)'
+EXTRA_LTLIBRARIES += libspatialaudio_plugin.la
+audio_filter_LTLIBRARIES += $(LTLIBspatialaudio)
 
 # Converters
 libaudio_format_plugin_la_SOURCES = audio_filter/converter/format.c

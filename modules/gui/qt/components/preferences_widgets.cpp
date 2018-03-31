@@ -35,7 +35,7 @@
 #include "util/customwidgets.hpp"
 #include "util/searchlineedit.hpp"
 #include "util/qt_dirs.hpp"
-#include <vlc_keys.h>
+#include <vlc_actions.h>
 #include <vlc_intf_strings.h>
 #include <vlc_modules.h>
 #include <vlc_plugin.h>
@@ -175,19 +175,19 @@ void InterfacePreviewWidget::setNormalPreview( bool b_minimal )
 
 void InterfacePreviewWidget::setPreview( enum_style e_style )
 {
-    QString pixmapLocationString(":/prefsmenu/");
+    QString pixmapLocationString;
 
     switch( e_style )
     {
     default:
     case COMPLETE:
-        pixmapLocationString += "sample_complete";
+        pixmapLocationString = ":/prefsmenu/sample_complete.png";
         break;
     case MINIMAL:
-        pixmapLocationString += "sample_minimal";
+        pixmapLocationString = ":/prefsmenu/sample_minimal.png";
         break;
     case SKINS:
-        pixmapLocationString += "sample_skins";
+        pixmapLocationString = ":/prefsmenu/sample_skins.png";
         break;
     }
 
@@ -204,7 +204,7 @@ void InterfacePreviewWidget::setPreview( enum_style e_style )
 void
 VStringConfigControl::doApply()
 {
-    config_PutPsz( p_this, getName(), qtu( getValue() ) );
+    config_PutPsz( getName(), qtu( getValue() ) );
 }
 
 /*********** String **************/
@@ -393,7 +393,7 @@ StringListConfigControl::StringListConfigControl( vlc_object_t *_p_this,
     combo->setMinimumWidth( MINWIDTH_BOX );
     combo->setSizePolicy( QSizePolicy::MinimumExpanding, QSizePolicy::Preferred );
 
-    module_config_t *p_module_config = config_FindConfig( p_this, p_item->psz_name );
+    module_config_t *p_module_config = config_FindConfig( p_item->psz_name );
 
     finish( p_module_config );
 }
@@ -421,7 +421,7 @@ StringListConfigControl::StringListConfigControl( vlc_object_t *_p_this,
     combo = _combo;
     label = _label;
 
-    module_config_t *p_module_config = config_FindConfig( p_this, getName() );
+    module_config_t *p_module_config = config_FindConfig( getName() );
 
     finish( p_module_config );
 }
@@ -434,8 +434,7 @@ void StringListConfigControl::finish(module_config_t *p_module_config )
     if(!p_module_config) return;
 
     char **values, **texts;
-    ssize_t count = config_GetPszChoices( p_this, p_item->psz_name,
-                                          &values, &texts );
+    ssize_t count = config_GetPszChoices( p_item->psz_name, &values, &texts );
     for( ssize_t i = 0; i < count && texts; i++ )
     {
         if( texts[i] == NULL || values[i] == NULL )
@@ -469,16 +468,14 @@ QString StringListConfigControl::getValue() const
 void setfillVLCConfigCombo( const char *configname, intf_thread_t *p_intf,
                             QComboBox *combo )
 {
-    module_config_t *p_config =
-                      config_FindConfig( VLC_OBJECT(p_intf), configname );
+    module_config_t *p_config = config_FindConfig( configname );
     if( p_config == NULL )
         return;
 
     if( (p_config->i_type & 0xF0) == CONFIG_ITEM_STRING )
     {
         char **values, **texts;
-        ssize_t count = config_GetPszChoices(VLC_OBJECT(p_intf),
-                                             configname, &values, &texts);
+        ssize_t count = config_GetPszChoices(configname, &values, &texts);
         for( ssize_t i = 0; i < count; i++ )
         {
             combo->addItem( qtr(texts[i]), QVariant(qfu(values[i])) );
@@ -494,8 +491,7 @@ void setfillVLCConfigCombo( const char *configname, intf_thread_t *p_intf,
     {
         int64_t *values;
         char **texts;
-        ssize_t count = config_GetIntChoices(VLC_OBJECT(p_intf), configname,
-                                             &values, &texts);
+        ssize_t count = config_GetIntChoices(configname, &values, &texts);
         for( ssize_t i = 0; i < count; i++ )
         {
             combo->addItem( qtr(texts[i]), QVariant(qlonglong(values[i])) );
@@ -757,7 +753,7 @@ void ModuleListConfigControl::onUpdate()
 void
 VIntConfigControl::doApply()
 {
-    config_PutInt( p_this, getName(), getValue() );
+    config_PutInt( getName(), getValue() );
 }
 
 /*********** Integer **************/
@@ -871,7 +867,7 @@ IntegerListConfigControl::IntegerListConfigControl( vlc_object_t *_p_this,
     combo = new QComboBox( p );
     combo->setMinimumWidth( MINWIDTH_BOX );
 
-    module_config_t *p_module_config = config_FindConfig( p_this, p_item->psz_name );
+    module_config_t *p_module_config = config_FindConfig( p_item->psz_name );
 
     finish( p_module_config );
 }
@@ -893,7 +889,7 @@ IntegerListConfigControl::IntegerListConfigControl( vlc_object_t *_p_this,
     combo = _combo;
     label = _label;
 
-    module_config_t *p_module_config = config_FindConfig( p_this, getName() );
+    module_config_t *p_module_config = config_FindConfig( getName() );
 
     finish( p_module_config );
 }
@@ -906,7 +902,7 @@ void IntegerListConfigControl::finish(module_config_t *p_module_config )
 
     int64_t *values;
     char **texts;
-    ssize_t count = config_GetIntChoices( p_this, p_module_config->psz_name,
+    ssize_t count = config_GetIntChoices( p_module_config->psz_name,
                                           &values, &texts );
     for( ssize_t i = 0; i < count; i++ )
     {
@@ -1042,7 +1038,7 @@ void ColorConfigControl::selectColor()
 void
 VFloatConfigControl::doApply()
 {
-    config_PutFloat( p_this, getName(), getValue() );
+    config_PutFloat( getName(), getValue() );
 }
 
 /*********** Float **************/
@@ -1133,7 +1129,7 @@ KeySelectorControl::KeySelectorControl( vlc_object_t *_p_this,
 {
     label = new QLabel(
         qtr( "Select or double click an action to change the associated "
-             "hotkey. Use delete key to remove hotkeys"), p );
+             "hotkey. Use delete key to remove hotkeys."), p );
 
     label->setWordWrap( true );
     searchLabel = new QLabel( qtr( "Search" ), p );
@@ -1355,12 +1351,10 @@ void KeySelectorControl::doApply()
     {
         it = table->topLevelItem(i);
         if( it->data( HOTKEY_COL, Qt::UserRole ).toInt() >= 0 )
-            config_PutPsz( p_this,
-                           qtu( it->data( ACTION_COL, Qt::UserRole ).toString() ),
+            config_PutPsz( qtu( it->data( ACTION_COL, Qt::UserRole ).toString() ),
                            qtu( it->data( HOTKEY_COL, Qt::UserRole ).toString() ) );
 
-        config_PutPsz( p_this,
-                       qtu( "global-" + it->data( ACTION_COL, Qt::UserRole ).toString() ),
+        config_PutPsz( qtu( "global-" + it->data( ACTION_COL, Qt::UserRole ).toString() ),
                        qtu( it->data( GLOBAL_HOTKEY_COL, Qt::UserRole ).toString() ) );
     }
 }

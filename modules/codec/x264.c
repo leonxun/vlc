@@ -69,7 +69,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 /* Frame-type options */
 
 #define KEYINT_TEXT N_("Maximum GOP size")
-#define KEYINT_LONGTEXT N_( "Sets maximum interval between IDR-frames." \
+#define KEYINT_LONGTEXT N_( "Sets maximum interval between IDR-frames. " \
     "Larger values save bits, thus improving quality for a given bitrate at " \
     "the cost of seeking precision. Use -1 for infinite." )
 
@@ -84,13 +84,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
     "I-frames, but do not start a new GOP." )
 
 #define OPENGOP_TEXT N_("Use recovery points to close GOPs")
-#if X264_BUILD < 115
-#define OPENGOP_LONGTEXT N_("none: use closed GOPs only\n"\
-    "normal: use standard open GOPs\n" \
-    "bluray: use Blu-ray compatible open GOPs" )
-#else
 #define OPENGOP_LONGTEXT N_("use open GOP, for bluray compatibility use also bluray-compat option")
-#endif
 
 #define BLURAY_TEXT N_("Enable compatibility hacks for Blu-ray support")
 #define BLURAY_LONGTEXT N_("Enable hacks for Blu-ray support, this doesn't enforce every aspect of Blu-ray compatibility\n" \
@@ -271,7 +265,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 /* Analysis */
 
 #define ANALYSE_TEXT N_("Partitions to consider")
-#define ANALYSE_LONGTEXT N_( "Partitions to consider in analyse mode: \n" \
+#define ANALYSE_LONGTEXT N_( "Partitions to consider in analyse mode:\n" \
     " - none  : \n" \
     " - fast  : i4x4\n" \
     " - normal: i4x4,p8x8,(i8x8)\n" \
@@ -283,7 +277,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 #define DIRECT_PRED_LONGTEXT DIRECT_PRED_TEXT
 
 #define DIRECT_PRED_SIZE_TEXT N_("Direct prediction size")
-#define DIRECT_PRED_SIZE_LONGTEXT N_( "Direct prediction size: "\
+#define DIRECT_PRED_SIZE_LONGTEXT N_( "Direct prediction size:\n" \
     " -  0: 4x4\n" \
     " -  1: 8x8\n" \
     " - -1: smallest possible according to level\n" )
@@ -292,7 +286,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 #define WEIGHTB_LONGTEXT N_( "Weighted prediction for B-frames.")
 
 #define WEIGHTP_TEXT N_("Weighted prediction for P-frames")
-#define WEIGHTP_LONGTEXT N_(" Weighted prediction for P-frames: "\
+#define WEIGHTP_LONGTEXT N_("Weighted prediction for P-frames:\n" \
     " - 0: Disabled\n"\
     " - 1: Blind offset\n"\
     " - 2: Smart analysis\n" )
@@ -349,7 +343,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
     "SATD-based decision for 8x8 transform in inter-MBs.")
 
 #define TRELLIS_TEXT N_("Trellis RD quantization" )
-#define TRELLIS_LONGTEXT N_( "Trellis RD quantization: \n" \
+#define TRELLIS_LONGTEXT N_( "Trellis RD quantization:\n" \
     " - 0: disabled\n" \
     " - 1: enabled only on the final encode of a MB\n" \
     " - 2: enabled on all mode decisions\n" \
@@ -359,7 +353,7 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 #define FAST_PSKIP_LONGTEXT N_( "Early SKIP detection on P-frames.")
 
 #define DCT_DECIMATE_TEXT N_("Coefficient thresholding on P-frames")
-#define DCT_DECIMATE_LONGTEXT N_( "Coefficient thresholding on P-frames." \
+#define DCT_DECIMATE_LONGTEXT N_( "Coefficient thresholding on P-frames. " \
     "Eliminate dct blocks containing only a small single coefficient.")
 
 #define PSY_TEXT N_("Use Psy-optimizations")
@@ -419,15 +413,12 @@ static void x264_log( void *, int i_level, const char *psz, va_list );
 #define PRESET_TEXT N_("Default preset setting used" )
 
 #define X264_OPTIONS_TEXT N_("x264 advanced options")
-#define X264_OPTIONS_LONGTEXT N_("x264 advanced options, in the form {opt=val,op2=val2} .")
+#define X264_OPTIONS_LONGTEXT N_("x264 advanced options, in the form {opt=val,op2=val2}.")
 
 static const char *const enc_me_list[] =
   { "dia", "hex", "umh", "esa", "tesa" };
 static const char *const enc_me_list_text[] =
   { N_("dia"), N_("hex"), N_("umh"), N_("esa"), N_("tesa") };
-
-static const char *const profile_list[] =
-  { "baseline", "main", "high" };
 
 static const char *const bpyramid_list[] =
   { "none", "strict", "normal" };
@@ -472,16 +463,10 @@ vlc_module_begin ()
     add_integer( SOUT_CFG_PREFIX "min-keyint", 25, MIN_KEYINT_TEXT,
                  MIN_KEYINT_LONGTEXT, true )
 
-#if X264_BUILD >= 102 && X264_BUILD <= 114
-    add_string( SOUT_CFG_PREFIX "opengop", "none", OPENGOP_TEXT,
-               OPENGOP_LONGTEXT, true )
-        change_string_list( x264_open_gop_names, x264_open_gop_names )
-#elif X264_BUILD > 114
     add_bool( SOUT_CFG_PREFIX "opengop", false, OPENGOP_TEXT,
                OPENGOP_LONGTEXT, true )
     add_bool( SOUT_CFG_PREFIX "bluray-compat", false, BLURAY_TEXT,
                BLURAY_LONGTEXT, true )
-#endif
 
     add_integer( SOUT_CFG_PREFIX "scenecut", 40, SCENE_TEXT,
                  SCENE_LONGTEXT, true )
@@ -501,13 +486,8 @@ vlc_module_begin ()
                  B_BIAS_LONGTEXT, true )
         change_integer_range( -100, 100 )
 
-#if X264_BUILD >= 87
     add_string( SOUT_CFG_PREFIX "bpyramid", "normal", BPYRAMID_TEXT,
               BPYRAMID_LONGTEXT, true )
-#else
-    add_string( SOUT_CFG_PREFIX "bpyramid", "none", BPYRAMID_TEXT,
-              BPYRAMID_LONGTEXT, true )
-#endif
         change_string_list( bpyramid_list, bpyramid_list )
 
     add_bool( SOUT_CFG_PREFIX "cabac", true, CABAC_TEXT, CABAC_LONGTEXT,
@@ -544,22 +524,18 @@ vlc_module_begin ()
     add_bool( SOUT_CFG_PREFIX "interlaced", false, INTERLACED_TEXT, INTERLACED_LONGTEXT,
               true )
 
-#if X264_BUILD >= 111
     add_integer( SOUT_CFG_PREFIX "frame-packing", -1, FRAMEPACKING_TEXT, FRAMEPACKING_LONGTEXT, true )
         change_integer_list( framepacking_list, framepacking_list_text )
         change_integer_range( -1, 6)
-#endif
 
     add_integer( SOUT_CFG_PREFIX "slices", 0, SLICE_COUNT, SLICE_COUNT_LONGTEXT, true )
     add_integer( SOUT_CFG_PREFIX "slice-max-size", 0, SLICE_MAX_SIZE, SLICE_MAX_SIZE_LONGTEXT, true )
     add_integer( SOUT_CFG_PREFIX "slice-max-mbs", 0, SLICE_MAX_MBS, SLICE_MAX_MBS_LONGTEXT, true )
 
-#if X264_BUILD >= 89
     add_string( SOUT_CFG_PREFIX "hrd", "none", HRD_TEXT, HRD_TEXT, true )
         vlc_config_set (VLC_CONFIG_LIST,
             (sizeof(x264_nal_hrd_names) / sizeof (char*)) - 1,
             x264_nal_hrd_names, x264_nal_hrd_names);
-#endif
 
 
 /* Ratecontrol */
@@ -845,20 +821,14 @@ static int  Open ( vlc_object_t *p_this )
     fullrange |= p_enc->fmt_in.video.b_color_range_full;
     p_enc->fmt_in.i_codec = fullrange ? VLC_CODEC_J420 : VLC_CODEC_I420;
     p_sys->i_colorspace = X264_CSP_I420;
-#if X264_BUILD >= 118
     char *psz_profile = var_GetString( p_enc, SOUT_CFG_PREFIX "profile" );
+# ifdef MODULE_NAME_IS_x26410b
+    const int mask = X264_CSP_HIGH_DEPTH;
+# else
+    const int mask = 0;
+# endif
     if( psz_profile )
     {
-        const int mask = x264_bit_depth > 8 ? X264_CSP_HIGH_DEPTH : 0;
-
-
-# ifdef MODULE_NAME_IS_x26410b
-        if( mask == 0)
-        {
-            msg_Err( p_enc, "Only high bit depth encoding supported, bit depth:%d", x264_bit_depth);
-            return VLC_EGENERIC;
-        }
-# endif
 
         if( !strcmp( psz_profile, "high10" ) )
         {
@@ -881,7 +851,6 @@ static int  Open ( vlc_object_t *p_this )
             msg_Err( p_enc, "Only high-profiles and 10-bit are supported");
             return VLC_EGENERIC;
         }
-
 # endif
     }
 # ifdef MODULE_NAME_IS_x26410b
@@ -892,7 +861,6 @@ static int  Open ( vlc_object_t *p_this )
     }
 # endif
     free( psz_profile );
-#endif //X264_BUILD
 
     p_enc->pf_encode_video = Encode;
     p_enc->pf_encode_audio = NULL;
@@ -915,6 +883,10 @@ static int  Open ( vlc_object_t *p_this )
 #else
     x264_param_default( &p_sys->param );
     x264_param_default_preset( &p_sys->param, psz_preset, psz_tune );
+# if X264_BUILD > 152
+    if( mask )
+        p_sys->param.i_bitdepth = 10;
+# endif
 #endif
     free( psz_preset );
     free( psz_tune );
@@ -1092,10 +1064,8 @@ static int  Open ( vlc_object_t *p_this )
     if( fabs( var_GetFloat( p_enc, SOUT_CFG_PREFIX "aq-strength" ) - 1.0) > 0.005 )
        p_sys->param.rc.f_aq_strength = var_GetFloat( p_enc, SOUT_CFG_PREFIX "aq-strength" );
 
-#if X264_BUILD >= 111
     if( var_GetInteger( p_enc, SOUT_CFG_PREFIX "frame-packing" ) > -1 )
        p_sys->param.i_frame_packing = var_GetInteger( p_enc, SOUT_CFG_PREFIX "frame-packing" );
-#endif
 
     if( var_GetBool( p_enc, SOUT_CFG_PREFIX "verbose" ) )
         p_sys->param.i_log_level = X264_LOG_DEBUG;
@@ -1111,26 +1081,14 @@ static int  Open ( vlc_object_t *p_this )
 
     i_val = var_GetInteger( p_enc, SOUT_CFG_PREFIX "keyint" );
     if( i_val > 0 && i_val != 250 ) p_sys->param.i_keyint_max = i_val;
-#if X264_BUILD >= 102
     if( i_val == -1 ) p_sys->param.i_keyint_max = X264_KEYINT_MAX_INFINITE;
-#endif
 
     i_val = var_GetInteger( p_enc, SOUT_CFG_PREFIX "min-keyint" );
     if( i_val > 0 && i_val != 25 ) p_sys->param.i_keyint_min = i_val;
 
-#if X264_BUILD >= 102 && X264_BUILD <= 114
-    psz_val = var_GetString( p_enc, SOUT_CFG_PREFIX "opengop" );
-    if( !strcmp( psz_val, "none" ) )
-        p_sys->param.i_open_gop = X264_OPEN_GOP_NONE;
-    else if( !strcmp( psz_val, "normal" ) )
-        p_sys->param.i_open_gop = X264_OPEN_GOP_NORMAL;
-    else if( !strcmp( psz_val, "bluray" ) )
-        p_sys->param.i_open_gop = X264_OPEN_GOP_BLURAY;
-    free( psz_val );
-#elif X264_BUILD >= 115
     p_sys->param.b_open_gop = var_GetBool( p_enc, SOUT_CFG_PREFIX "opengop" );
     p_sys->param.b_bluray_compat = var_GetBool( p_enc, SOUT_CFG_PREFIX "bluray-compat" );
-#endif
+
     i_val = var_GetInteger( p_enc, SOUT_CFG_PREFIX "bframes" );
     if( i_val >= 0 && i_val <= 16 && i_val != 3 )
         p_sys->param.i_bframe = i_val;
@@ -1168,14 +1126,12 @@ static int  Open ( vlc_object_t *p_this )
     if( i_val >= 1 && i_val != 7 )
         p_sys->param.analyse.i_subpel_refine = i_val;
 
-#if X264_BUILD >= 89
     psz_val = var_GetString( p_enc, SOUT_CFG_PREFIX "hrd");
     if( !strcmp( psz_val, "vbr" ) )
         p_sys->param.i_nal_hrd = X264_NAL_HRD_VBR;
     else if( !strcmp( psz_val, "cbr" ) )
         p_sys->param.i_nal_hrd = X264_NAL_HRD_CBR;
     free( psz_val );
-#endif
 
     //TODO: psz_val == NULL ?
     psz_val = var_GetString( p_enc, SOUT_CFG_PREFIX "me" );
@@ -1534,11 +1490,7 @@ static block_t *Encode( encoder_t *p_enc, picture_t *p_pict )
     int i_nal=0, i_out=0, i=0;
 
     /* init pic */
-#if X264_BUILD >= 98
     x264_picture_init( &pic );
-#else
-    memset( &pic, 0, sizeof( x264_picture_t ) );
-#endif
     if( likely(p_pict) ) {
        pic.i_pts = p_pict->date;
        pic.img.i_csp = p_sys->i_colorspace;

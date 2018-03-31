@@ -36,7 +36,6 @@
 #include <vlc_plugin.h>
 #include <vlc_aout.h>
 #include <vlc_charset.h>
-#include <vlc_memory.h>
 
 #include "audio_output/windows_audio_common.h"
 #include "audio_output/mmdevice.h"
@@ -49,8 +48,7 @@ static void Close( vlc_object_t * );
 static HRESULT StreamStart( aout_stream_t *, audio_sample_format_t *,
                             const GUID * );
 static HRESULT StreamStop( aout_stream_t * );
-static int ReloadDirectXDevices( vlc_object_t *, const char *,
-                                 char ***, char *** );
+static int ReloadDirectXDevices( const char *, char ***, char *** );
 static void * PlayedDataEraser( void * );
 /* Speaker setup override options list */
 static const char *const speaker_list[] = { "Windows default", "Mono", "Stereo",
@@ -518,7 +516,7 @@ static HRESULT CreateDSBufferPCM( vlc_object_t *obj, aout_stream_sys_t *sys,
                                   int i_rate, bool b_probe )
 {
     HRESULT hr;
-    unsigned i_nb_channels = popcount( i_channels );
+    unsigned i_nb_channels = vlc_popcount( i_channels );
 
     if( var_GetBool( obj, "directx-audio-float32" ) )
     {
@@ -788,8 +786,6 @@ static HRESULT Start( vlc_object_t *obj, aout_stream_sys_t *sys,
         }
     }
 
-    fmt.i_original_channels = fmt.i_physical_channels;
-
     int ret = vlc_clone(&sys->eraser_thread, PlayedDataEraser, (void*) obj,
                         VLC_THREAD_PRIORITY_LOW);
     if( unlikely( ret ) )
@@ -811,6 +807,8 @@ static HRESULT Start( vlc_object_t *obj, aout_stream_sys_t *sys,
         sys->p_dsobject = NULL;
         return ret;
     }
+
+    fmt.channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
 
     *pfmt = fmt;
     sys->b_playing = false;
@@ -935,7 +933,7 @@ static int VolumeSet( audio_output_t *p_aout, float volume )
     aout_VolumeReport( p_aout, volume );
 
     if( var_InheritBool( p_aout, "volume-save" ) )
-        config_PutFloat( p_aout, "directx-volume", volume );
+        config_PutFloat( "directx-volume", volume );
     return ret;
 }
 
@@ -1019,7 +1017,7 @@ static int CALLBACK DeviceEnumCallback( LPGUID guid, LPCWSTR desc,
 /**
  * Stores the list of devices in preferences
  */
-static int ReloadDirectXDevices( vlc_object_t *p_this, char const *psz_name,
+static int ReloadDirectXDevices( char const *psz_name,
                                  char ***values, char ***descs )
 {
     ds_list_t list = {
@@ -1033,7 +1031,6 @@ static int ReloadDirectXDevices( vlc_object_t *p_this, char const *psz_name,
     (void) psz_name;
 
     DirectSoundEnumerate( DeviceEnumCallback, &list );
-    msg_Dbg( p_this, "found %u devices", list.count );
 
     *values = list.ids;
     *descs = list.names;
@@ -1069,7 +1066,8 @@ static int Open(vlc_object_t *obj)
 
     /* DirectSound does not support hot-plug events (unless with WASAPI) */
     char **ids, **names;
-    int count = ReloadDirectXDevices(obj, NULL, &ids, &names);
+    int count = ReloadDirectXDevices(NULL, &ids, &names);
+    msg_Dbg(obj, "found %d devices", count);
     if (count >= 0)
     {
         for (int i = 0; i < count; i++)

@@ -30,7 +30,7 @@
 #include "input_manager.hpp"
 #include "recents.hpp"
 
-#include <vlc_keys.h>           /* ACTION_ID */
+#include <vlc_actions.h>           /* ACTION_ID */
 #include <vlc_url.h>            /* vlc_uri_decode */
 #include <vlc_strings.h>        /* vlc_strfinput */
 #include <vlc_aout.h>           /* audio_output_t */
@@ -1034,6 +1034,28 @@ vout_thread_t* MainInputManager::getVout()
     return p_input ? input_GetVout( p_input ) : NULL;
 }
 
+QVector<vout_thread_t*> MainInputManager::getVouts() const
+{
+    vout_thread_t **pp_vout;
+    size_t i_vout;
+
+    if( p_input == NULL
+     || input_Control( p_input, INPUT_GET_VOUTS, &pp_vout, &i_vout ) != VLC_SUCCESS
+     || i_vout == 0 )
+        return QVector<vout_thread_t*>();
+
+    QVector<vout_thread_t*> vector = QVector<vout_thread_t*>();
+    vector.reserve( i_vout );
+    for( size_t i = 0; i < i_vout; i++ )
+    {
+        assert( pp_vout[i] );
+        vector.append( pp_vout[i] );
+    }
+    free( pp_vout );
+
+    return vector;
+}
+
 audio_output_t * MainInputManager::getAout()
 {
     return playlist_GetAout( THEPL );
@@ -1119,7 +1141,7 @@ void MainInputManager::pause()
 
 void MainInputManager::toggleRandom()
 {
-    config_PutInt( p_intf, "random", var_ToggleBool( THEPL, "random" ) );
+    config_PutInt( "random", var_ToggleBool( THEPL, "random" ) );
 }
 
 void MainInputManager::notifyRandom(bool value)
@@ -1161,14 +1183,14 @@ void MainInputManager::loopRepeatLoopStatus()
 
     var_SetBool( THEPL, "loop", loop );
     var_SetBool( THEPL, "repeat", repeat );
-    config_PutInt( p_intf, "loop", loop );
-    config_PutInt( p_intf, "repeat", repeat );
+    config_PutInt( "loop", loop );
+    config_PutInt( "repeat", repeat );
 }
 
 void MainInputManager::activatePlayQuit( bool b_exit )
 {
     var_SetBool( THEPL, "play-and-exit", b_exit );
-    config_PutInt( p_intf, "play-and-exit", b_exit );
+    config_PutInt( "play-and-exit", b_exit );
 }
 
 bool MainInputManager::getPlayExitState()

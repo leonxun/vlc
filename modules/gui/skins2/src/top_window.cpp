@@ -47,7 +47,7 @@
 #include "../utils/position.hpp"
 #include "../utils/ustring.hpp"
 
-#include <vlc_keys.h>
+#include <vlc_actions.h>
 #include <vlc_input.h>
 #include <vlc_url.h>
 #include <list>
@@ -62,7 +62,7 @@ TopWindow::TopWindow( intf_thread_t *pIntf, int left, int top,
     m_rWindowManager( rWindowManager ),
     m_pActiveLayout( NULL ), m_pLastHitControl( NULL ),
     m_pCapturingControl( NULL ), m_pFocusControl( NULL ),
-    m_pDragControl( NULL ), m_currModifier( 0 )
+    m_pDragControl( NULL )
 {
     // Register as a moving window
     m_rWindowManager.registerWindow( *this );
@@ -209,9 +209,6 @@ void TopWindow::processEvent( EvtKey &rEvtKey )
     {
         getIntf()->p_sys->p_dialogs->sendKey( rEvtKey.getModKey() );
     }
-
-    // Always store the modifier, which can be needed for scroll events.
-    m_currModifier = rEvtKey.getMod();
 }
 
 void TopWindow::processEvent( EvtScroll &rEvtScroll )
@@ -237,7 +234,7 @@ void TopWindow::processEvent( EvtScroll &rEvtScroll )
     {
         // Treat the scroll event as a hotkey plus current modifiers
         int i = (rEvtScroll.getDirection() == EvtScroll::kUp ?
-                 KEY_MOUSEWHEELUP : KEY_MOUSEWHEELDOWN) | m_currModifier;
+                 KEY_MOUSEWHEELUP : KEY_MOUSEWHEELDOWN) | rEvtScroll.getMod();
 
         getIntf()->p_sys->p_dialogs->sendKey( i );
     }
@@ -264,18 +261,15 @@ void TopWindow::processEvent( EvtDragDrop &rEvtDragDrop )
         if( files.size() == 1 && pInput != NULL )
         {
             std::list<std::string>::const_iterator it = files.begin();
-            char* psz_file = vlc_uri2path( it->c_str() );
-            if( psz_file )
-            {
-                is_subtitle = !input_AddSubtitleOSD( pInput, psz_file, true, true );
-                free( psz_file );
-            }
+            is_subtitle = !input_AddSlave( pInput, SLAVE_TYPE_SPU,
+                                           it->c_str(), true, true, true );
         }
         if( !is_subtitle )
         {
             std::list<std::string>::const_iterator it = files.begin();
             for( bool first = true; it != files.end(); ++it, first = false )
             {
+                msg_Dbg( getIntf(),"Dropped item: %s", it->c_str() );
                 bool playOnDrop = m_playOnDrop && first;
                 CmdAddItem( getIntf(), it->c_str(), playOnDrop ).execute();
             }

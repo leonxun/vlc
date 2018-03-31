@@ -59,7 +59,7 @@ struct aout_sys_t
 
 static int Open (vlc_object_t *);
 static void Close (vlc_object_t *);
-static int EnumDevices (vlc_object_t *, char const *, char ***, char ***);
+static int EnumDevices(char const *, char ***, char ***);
 
 #define AUDIO_DEV_TEXT N_("Audio output device")
 #define AUDIO_DEV_LONGTEXT N_("Audio output device (using ALSA syntax).")
@@ -242,8 +242,8 @@ static unsigned SetupChannels (vlc_object_t *obj, snd_pcm_t *pcm,
         if (chans == -1)
             continue;
 
-        unsigned score = (popcount (chans & *mask) << 8)
-                       | (255 - popcount (chans));
+        unsigned score = (vlc_popcount (chans & *mask) << 8)
+                       | (255 - vlc_popcount (chans));
         if (score > best_score)
         {
             best_offset = p - maps;
@@ -469,8 +469,7 @@ static int Start (audio_output_t *aout, audio_sample_format_t *restrict fmt)
         sys->chans_to_reorder = SetupChannels (VLC_OBJECT(aout), pcm, &map,
                                                sys->chans_table);
         fmt->i_physical_channels = map;
-        fmt->i_original_channels = map;
-        channels = popcount (map);
+        channels = vlc_popcount (map);
     }
     else
     {
@@ -585,6 +584,7 @@ static int Start (audio_output_t *aout, audio_sample_format_t *restrict fmt)
         fmt->i_bytes_per_frame = AOUT_SPDIF_SIZE;
         fmt->i_frame_length = A52_FRAME_NB;
     }
+    fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
     sys->format = fmt->i_format;
 
     aout->time_get = TimeGet;
@@ -719,12 +719,11 @@ static void Stop (audio_output_t *aout)
 /**
  * Enumerates ALSA output devices.
  */
-static int EnumDevices(vlc_object_t *obj, char const *varname,
+static int EnumDevices(char const *varname,
                        char ***restrict idp, char ***restrict namep)
 {
     void **hints;
 
-    msg_Dbg (obj, "Available ALSA PCM devices:");
     if (snd_device_name_hint(-1, "pcm", &hints) < 0)
         return -1;
 
@@ -745,7 +744,6 @@ static int EnumDevices(vlc_object_t *obj, char const *varname,
             desc = xstrdup (name);
         for (char *lf = strchr(desc, '\n'); lf; lf = strchr(lf, '\n'))
             *lf = ' ';
-        msg_Dbg (obj, "%s (%s)", (desc != NULL) ? desc : name, name);
 
         ids = xrealloc (ids, (n + 1) * sizeof (*ids));
         names = xrealloc (names, (n + 1) * sizeof (*names));
@@ -809,11 +807,14 @@ static int Open(vlc_object_t *obj)
 
     /* ALSA does not support hot-plug events so list devices at startup */
     char **ids, **names;
-    int count = EnumDevices (VLC_OBJECT(aout), NULL, &ids, &names);
+    int count = EnumDevices(NULL, &ids, &names);
     if (count >= 0)
     {
+        msg_Dbg (obj, "Available ALSA PCM devices:");
+
         for (int i = 0; i < count; i++)
         {
+            msg_Dbg(obj, "%s: %s", ids[i], names[i]);
             aout_HotplugReport (aout, ids[i], names[i]);
             free (names[i]);
             free (ids[i]);

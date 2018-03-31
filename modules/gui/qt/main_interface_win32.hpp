@@ -36,11 +36,12 @@ public:
     virtual ~MainInterfaceWin32();
 
 private:
-#if HAS_QT5
     virtual bool nativeEvent(const QByteArray &eventType, void *message, long *result) Q_DECL_OVERRIDE;
-#endif
     virtual bool winEvent( MSG *, long * );
     virtual void toggleUpdateSystrayMenuWhenVisible() Q_DECL_OVERRIDE;
+
+protected:
+    virtual void resizeEvent( QResizeEvent *event ) Q_DECL_OVERRIDE;
 
 private:
     HWND WinId( QWidget *);

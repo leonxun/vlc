@@ -44,6 +44,23 @@
 
 #import <vlc_url.h>
 
+NSString *const VLCOpenTextFieldWasClicked = @"VLCOpenTextFieldWasClicked";
+
+@interface VLCOpenTextField : NSTextField
+- (void)mouseDown:(NSEvent *)theEvent;
+@end
+
+@implementation VLCOpenTextField
+
+- (void)mouseDown:(NSEvent *)theEvent
+{
+    [[NSNotificationCenter defaultCenter] postNotificationName: VLCOpenTextFieldWasClicked
+                                                        object: self];
+    [super mouseDown: theEvent];
+}
+
+@end
+
 struct display_info_t
 {
     CGRect rect;
@@ -67,7 +84,6 @@ struct display_info_t
     NSArray *_opticalDevices;
     NSMutableArray *_specialMediaFolders;
     NSString *_filePath;
-    NSView *_currentCaptureView;
     NSString *_fileSlavePath;
     NSString *_subPath;
     NSString *_MRL;
@@ -112,13 +128,16 @@ static NSString *kCaptureTabViewId  = @"capture";
     [self.window setCollectionBehavior: NSWindowCollectionBehaviorFullScreenAuxiliary];
 
     [self.window setTitle: _NS("Open Source")];
-    [_mrlLabel setStringValue: _NS("Media Resource Locator (MRL)")];
+    [_mrlButtonLabel setTitle: _NS("Media Resource Locator (MRL)")];
 
     [_okButton setTitle: _NS("Open")];
     [_cancelButton setTitle: _NS("Cancel")];
 
+    [_outputCheckbox setTitle:_NS("Stream output:")];
+    [_outputSettingsButton setTitle:_NS("Settings...")];
+
+    [_tabView accessibilitySetOverrideValue:_NS("Choose media input type") forAttribute:NSAccessibilityDescriptionAttribute];
     [[_tabView tabViewItemAtIndex: 0] setLabel: _NS("File")];
-    [_tabView accessibilitySetOverrideValue:_NS("4 Tabs to choose between media input. Select 'File' for files, 'Disc' for optical media such as DVDs, Audio CDs or BRs, 'Network' for network streams or 'Capture' for Input Devices such as microphones or cameras.") forAttribute:NSAccessibilityDescriptionAttribute];
     [[_tabView tabViewItemAtIndex: 1] setLabel: _NS("Disc")];
     [[_tabView tabViewItemAtIndex: 2] setLabel: _NS("Network")];
     [[_tabView tabViewItemAtIndex: 3] setLabel: _NS("Capture")];
@@ -126,12 +145,12 @@ static NSString *kCaptureTabViewId  = @"capture";
     [_fileNameStubLabel setStringValue: _NS("Choose a file")];
     [_fileIconWell setImage: [NSImage imageNamed:@"generic"]];
     [_fileBrowseButton setTitle: _NS("Browse...")];
-    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Click to select a file for playback") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Select a file for playback") forAttribute:NSAccessibilityDescriptionAttribute];
     [_fileTreatAsPipeButton setTitle: _NS("Treat as a pipe rather than as a file")];
     [_fileTreatAsPipeButton setHidden: NO];
     [_fileSlaveCheckbox setTitle: _NS("Play another media synchronously")];
     [_fileSelectSlaveButton setTitle: _NS("Choose...")];
-    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Click to select a another file to play it in sync with the previously selected file.") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Select another file to play in sync with the previously selected file") forAttribute:NSAccessibilityDescriptionAttribute];
     [_fileSlaveFilenameLabel setStringValue: @""];
     [_fileSlaveIconWell setImage: NULL];
     [_fileSubtitlesFilenameLabel setStringValue: @""];
@@ -169,7 +188,7 @@ static NSString *kCaptureTabViewId  = @"capture";
     [_netHTTPURLLabel setStringValue: _NS("URL")];
     [_netHelpLabel setStringValue: _NS("To Open a usual network stream (HTTP, RTSP, RTMP, MMS, FTP, etc.), just enter the URL in the field above. If you want to open a RTP or UDP stream, press the button below.")];
     [_netHelpUDPLabel setStringValue: _NS("If you want to open a multicast stream, enter the respective IP address given by the stream provider. In unicast mode, VLC will use your machine's IP automatically.\n\nTo open a stream using a different protocol, just press Cancel to close this sheet.")];
-    [_netHTTPURLTextField accessibilitySetOverrideValue:_NS("Enter a URL here to open the network stream. To open RTP or UDP streams, click on the respective button below.") forAttribute:NSAccessibilityDescriptionAttribute];
+    [_netHTTPURLTextField accessibilitySetOverrideValue:_NS("Enter a stream URL here. To open RTP or UDP streams, use the respective button below.") forAttribute:NSAccessibilityDescriptionAttribute];
     [_netUDPCancelButton setTitle: _NS("Cancel")];
     [_netUDPOKButton setTitle: _NS("Open")];
     [_netOpenUDPButton setTitle: _NS("Open RTP/UDP Stream")];
@@ -180,13 +199,12 @@ static NSString *kCaptureTabViewId  = @"capture";
     [[_netModeMatrix cellAtRow:0 column:0] setTitle: _NS("Unicast")];
     [[_netModeMatrix cellAtRow:1 column:0] setTitle: _NS("Multicast")];
 
-    [_netUDPPortTextField setIntValue: config_GetInt(getIntf(), "server-port")];
-    [_netUDPPortStepper setIntValue: config_GetInt(getIntf(), "server-port")];
+    [_netUDPPortTextField setIntValue: config_GetInt("server-port")];
+    [_netUDPPortStepper setIntValue: config_GetInt("server-port")];
 
     [_captureModePopup removeAllItems];
     [_captureModePopup addItemWithTitle: _NS("Input Devices")];
     [_captureModePopup addItemWithTitle: _NS("Screen")];
-    [_screenlongLabel setStringValue: _NS("This input allows you to save, stream or display your current screen contents.")];
     [_screenFPSLabel setStringValue: [NSString stringWithFormat:@"%@:",_NS("Frames per Second")]];
     [_screenLabel setStringValue: [NSString stringWithFormat:@"%@:",_NS("Screen")]];
     [_screenLeftLabel setStringValue: [NSString stringWithFormat:@"%@:",_NS("Subscreen left")]];
@@ -199,6 +217,9 @@ static NSString *kCaptureTabViewId  = @"capture";
     // setup start / stop time fields
     [_fileStartTimeTextField setFormatter:[[PositionFormatter alloc] init]];
     [_fileStopTimeTextField setFormatter:[[PositionFormatter alloc] init]];
+
+    // Auto collapse MRL field
+    self.mrlViewHeightConstraint.constant = 0;
 
     [self updateQTKVideoDevices];
     [_qtkVideoDevicePopup removeAllItems];
@@ -318,16 +339,16 @@ static NSString *kCaptureTabViewId  = @"capture";
 {
     int i_index;
     module_config_t * p_item;
-    intf_thread_t * p_intf = getIntf();
 
     [_fileSubCheckbox setTitle: _NS("Add Subtitle File:")];
     [_fileSubPathLabel setStringValue: _NS("Choose a file")];
     [_fileSubPathLabel setHidden: NO];
     [_fileSubPathTextField setStringValue: @""];
     [_fileSubSettingsButton setTitle: _NS("Choose...")];
-    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Click to setup subtitle playback in full detail.") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileSubSettingsButton cell] accessibilitySetOverrideValue:_NS("Setup subtitle playback details") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileBrowseButton cell] accessibilitySetOverrideValue:_NS("Select a file for playback") forAttribute:NSAccessibilityDescriptionAttribute];
     [_fileSubBrowseButton setTitle: _NS("Browse...")];
-    [[_fileSubBrowseButton cell] accessibilitySetOverrideValue:_NS("Click to select a subtitle file.") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileSubBrowseButton cell] accessibilitySetOverrideValue:_NS("Select a subtitle file") forAttribute:NSAccessibilityDescriptionAttribute];
     [_fileSubOverrideCheckbox setTitle: _NS("Override parameters")];
     [_fileSubDelayLabel setStringValue: _NS("Delay")];
     [_fileSubDelayStepper setEnabled: NO];
@@ -340,11 +361,11 @@ static NSString *kCaptureTabViewId  = @"capture";
     [_fileSubAlignLabel setStringValue: _NS("Subtitle alignment")];
     [_fileSubAlignPopup removeAllItems];
     [_fileSubOKButton setStringValue: _NS("OK")];
-    [[_fileSubOKButton cell] accessibilitySetOverrideValue:_NS("Click to dismiss the subtitle setup dialog.") forAttribute:NSAccessibilityDescriptionAttribute];
+    [[_fileSubOKButton cell] accessibilitySetOverrideValue:_NS("Dismiss the subtitle setup dialog") forAttribute:NSAccessibilityDescriptionAttribute];
     [_fileSubFontBox setTitle: _NS("Font Properties")];
     [_fileSubFileBox setTitle: _NS("Subtitle File")];
 
-    p_item = config_FindConfig(VLC_OBJECT(p_intf), "subsdec-encoding");
+    p_item = config_FindConfig("subsdec-encoding");
 
     if (p_item) {
         for (int i = 0; i < p_item->list_count; i++) {
@@ -358,7 +379,7 @@ static NSString *kCaptureTabViewId  = @"capture";
             [_fileSubEncodingPopup selectItemAtIndex:0];
     }
 
-    p_item = config_FindConfig(VLC_OBJECT(p_intf), "subsdec-align");
+    p_item = config_FindConfig("subsdec-align");
 
     if (p_item) {
         for (i_index = 0; i_index < p_item->list_count; i_index++)
@@ -367,7 +388,7 @@ static NSString *kCaptureTabViewId  = @"capture";
         [_fileSubAlignPopup selectItemAtIndex: p_item->value.i];
     }
 
-    p_item = config_FindConfig(VLC_OBJECT(p_intf), "freetype-rel-fontsize");
+    p_item = config_FindConfig("freetype-rel-fontsize");
 
     if (p_item) {
         for (i_index = 0; i_index < p_item->list_count; i_index++) {
@@ -416,8 +437,7 @@ static NSString *kCaptureTabViewId  = @"capture";
         [options addObject: [NSString stringWithFormat:
                              @"subsdec-align=%li", [_fileSubAlignPopup indexOfSelectedItem]]];
 
-        p_item = config_FindConfig(VLC_OBJECT(getIntf()),
-                                   "freetype-rel-fontsize");
+        p_item = config_FindConfig("freetype-rel-fontsize");
 
         if (p_item) {
             [options addObject: [NSString stringWithFormat:
@@ -489,50 +509,6 @@ static NSString *kCaptureTabViewId  = @"capture";
     [[[VLCMain sharedInstance] playlist] addPlaylistItems:[NSArray arrayWithObject:itemOptionsDictionary]];
 }
 
-- (IBAction)screenChanged:(id)sender
-{
-    int selected_index = [_screenPopup indexOfSelectedItem];
-    if (selected_index >= [_displayInfos count]) return;
-
-    NSValue *v = [_displayInfos objectAtIndex:selected_index];
-    struct display_info_t *item = (struct display_info_t *)[v pointerValue];
-
-    [_screenLeftStepper setMaxValue: item->rect.size.width];
-    [_screenTopStepper setMaxValue: item->rect.size.height];
-    [_screenWidthStepper setMaxValue: item->rect.size.width];
-    [_screenHeightStepper setMaxValue: item->rect.size.height];
-
-    [_screenqtkAudioPopup setEnabled: [_screenqtkAudioCheckbox state]];
-}
-
-- (IBAction)qtkChanged:(id)sender
-{
-    NSInteger selectedDevice = [_qtkVideoDevicePopup indexOfSelectedItem];
-    if (_avvideoDevices.count >= 1) {
-        _avCurrentDeviceUID = [[(AVCaptureDevice *)[_avvideoDevices objectAtIndex:selectedDevice] uniqueID] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    }
-}
-
-- (IBAction)qtkAudioChanged:(id)sender
-{
-    NSInteger selectedDevice = [_qtkAudioDevicePopup indexOfSelectedItem];
-    if (_avaudioDevices.count >= 1) {
-        _avCurrentAudioDeviceUID = [[(AVCaptureDevice *)[_avaudioDevices objectAtIndex:selectedDevice] uniqueID] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
-    }
-    [_screenqtkAudioPopup selectItemAtIndex: selectedDevice];
-    [_qtkAudioDevicePopup selectItemAtIndex: selectedDevice];
-}
-
-- (IBAction)qtkToggleUIElements:(id)sender
-{
-    [_qtkAudioDevicePopup setEnabled:[_qtkAudioCheckbox state]];
-    BOOL b_state = [_qtkVideoCheckbox state];
-    [_qtkVideoDevicePopup setEnabled:b_state];
-    [self qtkAudioChanged:sender];
-    [self qtkChanged:sender];
-    [self openCaptureModeChanged:sender];
-}
-
 #pragma mark -
 #pragma mark Main Actions
 
@@ -553,33 +529,11 @@ static NSString *kCaptureTabViewId  = @"capture";
 
 - (IBAction)expandMRLfieldAction:(id)sender
 {
-    NSRect windowRect = [self.window frame];
-    NSRect viewRect = [_mrlView frame];
-
     if ([_mrlButton state] == NSOffState) {
-        /* we need to collaps, restore the panel size */
-        windowRect.size.height = windowRect.size.height - viewRect.size.height;
-        windowRect.origin.y = (windowRect.origin.y + viewRect.size.height) - viewRect.size.height;
-
-        /* remove the MRL view */
-        [_mrlView removeFromSuperview];
+        self.mrlViewHeightConstraint.animator.constant = 0;
     } else {
-        /* we need to expand */
-        [_mrlView setFrame: NSMakeRect(0,
-                                       [_mrlButton frame].origin.y,
-                                       viewRect.size.width,
-                                       viewRect.size.height)];
-        [_mrlView setNeedsDisplay: NO];
-        [_mrlView setAutoresizesSubviews: YES];
-
-        /* enlarge panel size for MRL view */
-        windowRect.size.height = windowRect.size.height + viewRect.size.height;
+        self.mrlViewHeightConstraint.animator.constant = 39;
     }
-
-    [[self.window animator] setFrame: windowRect display:YES];
-
-    if ([_mrlButton state] == NSOnState)
-        [[self.window contentView] addSubview: _mrlView];
 }
 
 - (void)openFileGeneric
@@ -618,7 +572,7 @@ static NSString *kCaptureTabViewId  = @"capture";
     [openPanel setTitle: _NS("Open File")];
     [openPanel setPrompt: _NS("Open")];
 
-    if ([openPanel runModal] == NSOKButton) {
+    if ([openPanel runModal] == NSModalResponseOK) {
         NSArray *URLs = [openPanel URLs];
         NSUInteger count = [URLs count];
         NSMutableArray *values = [NSMutableArray arrayWithCapacity:count];
@@ -725,7 +679,7 @@ static NSString *kCaptureTabViewId  = @"capture";
         openPanel = [NSOpenPanel openPanel];
         [openPanel setCanChooseFiles: YES];
         [openPanel setCanChooseDirectories: NO];
-        if ([openPanel runModal] == NSOKButton) {
+        if ([openPanel runModal] == NSModalResponseOK) {
             _fileSlavePath = [[[openPanel URLs] firstObject] path];
         }
     }
@@ -755,6 +709,7 @@ static NSString *kCaptureTabViewId  = @"capture";
     NSRect viewRect = [theView frame];
     [theView setFrame: NSMakeRect(233, 0, viewRect.size.width, viewRect.size.height)];
     [theView setAutoresizesSubviews: YES];
+
     NSView *opticalTabView = [[_tabView tabViewItemAtIndex: [_tabView indexOfTabViewItemWithIdentifier:kDiscTabViewId]] view];
     if (_currentOpticalMediaView) {
         [[opticalTabView animator] replaceSubview: _currentOpticalMediaView with: theView];
@@ -940,7 +895,7 @@ static NSString *kCaptureTabViewId  = @"capture";
     [openPanel setCanChooseFiles: YES];
     [openPanel setAllowedFileTypes:[NSArray arrayWithObject:@"public.directory"]];
 
-    if ([openPanel runModal] == NSOKButton) {
+    if ([openPanel runModal] == NSModalResponseOK) {
         NSString *oPath = [[[openPanel URLs] firstObject] path];
         if ([oPath length] > 0) {
             [NSThread detachNewThreadSelector:@selector(scanSpecialPath:) toTarget:self withObject:oPath];
@@ -1056,7 +1011,7 @@ static NSString *kCaptureTabViewId  = @"capture";
             else
                 mrlString = @"rtp://";
 
-            if (port != config_GetInt(getIntf(), "server-port")) {
+            if (port != config_GetInt("server-port")) {
                 mrlString =
                 [mrlString stringByAppendingFormat: @"@:%i", port];
             }
@@ -1070,7 +1025,7 @@ static NSString *kCaptureTabViewId  = @"capture";
             else
                 mrlString = [NSString stringWithFormat: @"rtp://@%@", oAddress];
 
-            if (iPort != config_GetInt(getIntf(), "server-port")) {
+            if (iPort != config_GetInt("server-port")) {
                 mrlString =
                 [mrlString stringByAppendingFormat: @":%i", iPort];
             }
@@ -1105,7 +1060,7 @@ static NSString *kCaptureTabViewId  = @"capture";
             else
                 mrlString = @"rtp://";
 
-            if (port != config_GetInt(getIntf(), "server-port")) {
+            if (port != config_GetInt("server-port")) {
                 mrlString =
                 [mrlString stringByAppendingFormat: @"@:%i", port];
             }
@@ -1119,7 +1074,7 @@ static NSString *kCaptureTabViewId  = @"capture";
             else
                 mrlString = [NSString stringWithFormat: @"rtp://@%@", oAddress];
 
-            if (iPort != config_GetInt(getIntf(), "server-port")) {
+            if (iPort != config_GetInt("server-port")) {
                 mrlString =
                 [mrlString stringByAppendingFormat: @":%i", iPort];
             }
@@ -1134,35 +1089,23 @@ static NSString *kCaptureTabViewId  = @"capture";
 #pragma mark -
 #pragma mark Capture Panel
 
-- (void)showCaptureView: theView
-{
-    NSRect viewRect = [theView frame];
-    [theView setFrame: NSMakeRect(0, -10, viewRect.size.width, viewRect.size.height)];
-    [theView setAutoresizesSubviews: YES];
-    if (_currentCaptureView) {
-        [[[[_tabView tabViewItemAtIndex: 3] view] animator] replaceSubview: _currentCaptureView with: theView];
-    } else {
-        [[[[_tabView tabViewItemAtIndex: 3] view] animator] addSubview: theView];
-    }
-    _currentCaptureView = theView;
-}
-
 - (IBAction)openCaptureModeChanged:(id)sender
 {
     intf_thread_t * p_intf = getIntf();
 
     if ([[[_captureModePopup selectedItem] title] isEqualToString: _NS("Screen")]) {
-        [self showCaptureView: _screenView];
-        [self setMRL: @"screen://"];
-        [_screenHeightTextField setIntValue: config_GetInt(p_intf, "screen-height")];
-        [_screenWidthTextField setIntValue: config_GetInt(p_intf, "screen-width")];
-        [_screenFPSTextField setFloatValue: config_GetFloat(p_intf, "screen-fps")];
-        [_screenLeftTextField setIntValue: config_GetInt(p_intf, "screen-left")];
-        [_screenTopTextField setIntValue: config_GetInt(p_intf, "screen-top")];
-        [_screenFollowMouseCheckbox setIntValue: config_GetInt(p_intf, "screen-follow-mouse")];
+        [_captureTabView selectTabViewItemAtIndex:1];
 
-        int screenIindex = config_GetInt(p_intf, "screen-index");
-        int displayID = config_GetInt(p_intf, "screen-display-id");
+        [self setMRL: @"screen://"];
+        [_screenHeightTextField setIntValue: config_GetInt("screen-height")];
+        [_screenWidthTextField setIntValue: config_GetInt("screen-width")];
+        [_screenFPSTextField setFloatValue: config_GetFloat("screen-fps")];
+        [_screenLeftTextField setIntValue: config_GetInt("screen-left")];
+        [_screenTopTextField setIntValue: config_GetInt("screen-top")];
+        [_screenFollowMouseCheckbox setIntValue: config_GetInt("screen-follow-mouse")];
+
+        int screenIindex = config_GetInt("screen-index");
+        int displayID = config_GetInt("screen-display-id");
         unsigned int displayCount = 0;
         CGError returnedError;
         struct display_info_t *item;
@@ -1171,7 +1114,7 @@ static NSString *kCaptureTabViewId  = @"capture";
         returnedError = CGGetOnlineDisplayList(0, NULL, &displayCount);
         if (!returnedError) {
             CGDirectDisplayID *ids;
-            ids = (CGDirectDisplayID *)malloc(displayCount * sizeof(CGDirectDisplayID));
+            ids = (CGDirectDisplayID *)vlc_alloc(displayCount, sizeof(CGDirectDisplayID));
             returnedError = CGGetOnlineDisplayList(displayCount, ids, &displayCount);
             if (!returnedError) {
                 NSUInteger displayInfoCount = [_displayInfos count];
@@ -1201,7 +1144,8 @@ static NSString *kCaptureTabViewId  = @"capture";
         }
     }
     else if ([[[_captureModePopup selectedItem] title] isEqualToString: _NS("Input Devices")]) {
-        [self showCaptureView: _qtkView];
+        [_captureTabView selectTabViewItemAtIndex:0];
+
         [self qtkChanged:nil];
         [self qtkAudioChanged:nil];
 
@@ -1214,12 +1158,63 @@ static NSString *kCaptureTabViewId  = @"capture";
     }
 }
 
+// Screen actions
 - (void)screenFPSfieldChanged:(NSNotification *)o_notification
 {
     [_screenFPSStepper setFloatValue: [_screenFPSTextField floatValue]];
     if ([[_screenFPSTextField stringValue] isEqualToString: @""])
         [_screenFPSTextField setFloatValue: 1.0];
     [self setMRL: @"screen://"];
+}
+
+- (IBAction)screenChanged:(id)sender
+{
+    int selected_index = [_screenPopup indexOfSelectedItem];
+    if (selected_index >= [_displayInfos count]) return;
+
+    NSValue *v = [_displayInfos objectAtIndex:selected_index];
+    struct display_info_t *item = (struct display_info_t *)[v pointerValue];
+
+    [_screenLeftStepper setMaxValue: item->rect.size.width];
+    [_screenTopStepper setMaxValue: item->rect.size.height];
+    [_screenWidthStepper setMaxValue: item->rect.size.width];
+    [_screenHeightStepper setMaxValue: item->rect.size.height];
+
+    [_screenqtkAudioPopup setEnabled: [_screenqtkAudioCheckbox state]];
+}
+
+- (IBAction)screenAudioChanged:(id)sender
+{
+    [_screenqtkAudioPopup setEnabled:_screenqtkAudioCheckbox.state];
+}
+
+// QTKit Recording actions
+- (IBAction)qtkChanged:(id)sender
+{
+    NSInteger selectedDevice = [_qtkVideoDevicePopup indexOfSelectedItem];
+    if (_avvideoDevices.count >= 1) {
+        _avCurrentDeviceUID = [[(AVCaptureDevice *)[_avvideoDevices objectAtIndex:selectedDevice] uniqueID] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+}
+
+- (IBAction)qtkAudioChanged:(id)sender
+{
+    NSInteger selectedDevice = [_qtkAudioDevicePopup indexOfSelectedItem];
+    if (_avaudioDevices.count >= 1) {
+        _avCurrentAudioDeviceUID = [[(AVCaptureDevice *)[_avaudioDevices objectAtIndex:selectedDevice] uniqueID] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    [_screenqtkAudioPopup selectItemAtIndex: selectedDevice];
+    [_qtkAudioDevicePopup selectItemAtIndex: selectedDevice];
+}
+
+- (IBAction)qtkToggleUIElements:(id)sender
+{
+    [_qtkAudioDevicePopup setEnabled:[_qtkAudioCheckbox state]];
+    BOOL b_state = [_qtkVideoCheckbox state];
+    [_qtkVideoDevicePopup setEnabled:b_state];
+    [self qtkAudioChanged:sender];
+    [self qtkChanged:sender];
+    [self openCaptureModeChanged:sender];
 }
 
 #pragma mark -
@@ -1263,7 +1258,7 @@ static NSString *kCaptureTabViewId  = @"capture";
     [openPanel setTitle: _NS("Open File")];
     [openPanel setPrompt: _NS("Open")];
 
-    if ([openPanel runModal] == NSOKButton) {
+    if ([openPanel runModal] == NSModalResponseOK) {
         _subPath = [[[openPanel URLs] firstObject] path];
         [_fileSubtitlesFilenameLabel setStringValue: [[NSFileManager defaultManager] displayNameAtPath:_subPath]];
         [_fileSubPathTextField setStringValue: [_fileSubtitlesFilenameLabel stringValue]];

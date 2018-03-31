@@ -1,5 +1,5 @@
 /*****************************************************************************
- * VLCStatusBarIcon.h: Mac OS X module for vlc
+ * VLCStatusBarIcon.h: Status bar icon controller/delegate
  *****************************************************************************
  * Copyright (C) 2016 VLC authors and VideoLAN
  * $Id$
@@ -27,6 +27,9 @@
 
 @property (readwrite, strong) NSStatusItem *statusItem;
 @property (readwrite, strong) IBOutlet NSMenu *vlcStatusBarIconMenu;
+
+@property (strong) IBOutlet NSView *playbackInfoView;
+@property (strong) IBOutlet NSView *controlsView;
 
 // Get data from VLC and update the little status menu
 - (void)updateMenuItemRandom;

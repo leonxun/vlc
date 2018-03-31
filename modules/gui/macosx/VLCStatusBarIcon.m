@@ -1,5 +1,5 @@
 /*****************************************************************************
- * VLCStatusBarIcon.m: Mac OS X module for vlc
+ * VLCStatusBarIcon.m: Status bar icon controller/delegate
  *****************************************************************************
  * Copyright (C) 2016 VLC authors and VideoLAN
  * $Id$
@@ -90,16 +90,20 @@
 - (void)awakeFromNib
 {
     [super awakeFromNib];
+
+    [_controlsView setAutoresizingMask:NSViewWidthSizable];
+    [_playbackInfoView setAutoresizingMask:NSViewWidthSizable];
+
     [self configurationChanged:nil];
 
     // Set Accessibility Attributes for Image Buttons
-    [backwardsButton.cell accessibilitySetOverrideValue:_NS("Go to previous track")
+    [backwardsButton.cell accessibilitySetOverrideValue:_NS("Go to previous item")
                                            forAttribute:NSAccessibilityDescriptionAttribute];
 
-    [playPauseButton.cell accessibilitySetOverrideValue:_NS("Play or pause current media")
+    [playPauseButton.cell accessibilitySetOverrideValue:_NS("Toggle Play/Pause")
                                            forAttribute:NSAccessibilityDescriptionAttribute];
 
-    [forwardButton.cell accessibilitySetOverrideValue:_NS("Go to next track")
+    [forwardButton.cell accessibilitySetOverrideValue:_NS("Go to next item")
                                          forAttribute:NSAccessibilityDescriptionAttribute];
 
     [randButton.cell accessibilitySetOverrideValue:_NS("Toggle random order playback")
@@ -139,7 +143,7 @@
 
         // Sync status bar visibility with VLC setting
         msg_Dbg(getIntf(), "Status bar icon visibility changed to %i", isVisible);
-        config_PutInt(getIntf(), "macosx-statusicon", isVisible ? 1 : 0);
+        config_PutInt("macosx-statusicon", isVisible ? 1 : 0);
     } else {
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
     }
@@ -175,7 +179,7 @@
         // Visibility is 10.12+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpartial-availability"
-        if (OSX_SIERRA) {
+        if (OSX_SIERRA_AND_HIGHER) {
             [self.statusItem setBehavior:NSStatusItemBehaviorRemovalAllowed];
             [self.statusItem setAutosaveName:@"statusBarItem"];
             [self.statusItem addObserver:self forKeyPath:NSStringFromSelector(@selector(isVisible))
@@ -183,7 +187,7 @@
         }
     }
 
-    if (OSX_SIERRA) {
+    if (OSX_SIERRA_AND_HIGHER) {
         // Sync VLC setting with status bar visibility setting (10.12 runtime only)
         [self.statusItem setVisible:YES];
     }
@@ -195,7 +199,7 @@
         return;
 
     // Lets keep alive the object in Sierra, and destroy it in older OS versions
-    if (OSX_SIERRA) {
+    if (OSX_SIERRA_AND_HIGHER) {
         self.statusItem.visible = NO;
     } else {
         [[NSStatusBar systemStatusBar] removeStatusItem:self.statusItem];

@@ -157,25 +157,12 @@ static int Open( vlc_object_t *p_this )
     es_format_Copy( &p_dec->fmt_out, &p_dec->fmt_in );
     p_dec->fmt_out.i_codec = VLC_CODEC_MP4V;
 
-    free(p_dec->fmt_out.p_extra);
-
-    if( p_dec->fmt_in.i_extra )
+    if( p_dec->fmt_out.i_extra )
     {
         /* We have a vol */
-        p_dec->fmt_out.i_extra = p_dec->fmt_in.i_extra;
-        p_dec->fmt_out.p_extra = xmalloc( p_dec->fmt_in.i_extra );
-        memcpy( p_dec->fmt_out.p_extra, p_dec->fmt_in.p_extra,
-                p_dec->fmt_in.i_extra );
-
-        msg_Dbg( p_dec, "opening with vol size: %d", p_dec->fmt_in.i_extra );
+        msg_Dbg( p_dec, "opening with vol size: %d", p_dec->fmt_out.i_extra );
         ParseVOL( p_dec, &p_dec->fmt_out,
                   p_dec->fmt_out.p_extra, p_dec->fmt_out.i_extra );
-    }
-    else
-    {
-        /* No vol, we'll have to look for one later on */
-        p_dec->fmt_out.i_extra = 0;
-        p_dec->fmt_out.p_extra = 0;
     }
 
     /* Set callback */
@@ -375,11 +362,13 @@ static int ParseVOL( decoder_t *p_dec, es_format_t *fmt,
 
     for( ;; )
     {
+        if( i_vol <= 5 )
+            return VLC_EGENERIC;
+
         if( p_vol[0] == 0x00 && p_vol[1] == 0x00 && p_vol[2] == 0x01 &&
             p_vol[3] >= 0x20 && p_vol[3] <= 0x2f ) break;
 
         p_vol++; i_vol--;
-        if( i_vol <= 4 ) return VLC_EGENERIC;
     }
 
     bs_init( &s, &p_vol[4], i_vol - 4 );

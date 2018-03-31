@@ -33,6 +33,7 @@
 #include <vlc_es.h>
 #include <vlc_iso_lang.h>
 #include <vlc_bits.h>
+#include <vlc_text_style.h>
 #include <assert.h>
 #include <time.h>
 
@@ -49,8 +50,6 @@ bool mp4mux_trackinfo_Init(mp4mux_trackinfo_t *p_stream, unsigned i_id,
     p_stream->entry         = calloc(p_stream->i_entry_max, sizeof(mp4mux_entry_t));
     if(!p_stream->entry)
         return false;
-
-    es_format_Init(&p_stream->fmt, 0, 0);
 
     return true;
 }
@@ -104,8 +103,8 @@ void box_gather (bo_t *box, bo_t *box2)
 {
     if(box2 && box2->b && box && box->b)
     {
-        box_fix(box2, box2->b->i_buffer);
-        size_t i_offset = box->b->i_buffer;
+        box_fix(box2, bo_size( box2 ));
+        size_t i_offset = bo_size( box );
         box->b = block_Realloc(box->b, 0, box->b->i_buffer + box2->b->i_buffer);
         if(likely(box->b))
             memcpy(&box->b->p_buffer[i_offset], box2->b->p_buffer, box2->b->i_buffer);
@@ -271,6 +270,7 @@ static bo_t *GetESDS(mp4mux_trackinfo_t *p_track)
             i_object_type_indication = 0x6b;
             break;
         }
+        /* fallthrough */
     case VLC_CODEC_MP2V:
         /* MPEG-I=0x6b, MPEG-II = 0x60 -> 0x65 */
         i_object_type_indication = 0x65;
@@ -573,106 +573,6 @@ static bo_t *GetD263Tag(void)
     return d263;
 }
 
-static void hevcParseVPS(uint8_t * p_buffer, size_t i_buffer, uint8_t *general,
-                         uint8_t * numTemporalLayer, bool * temporalIdNested)
-{
-    if(i_buffer < 19)
-        return;
-
-    bs_t bs;
-    bs_init(&bs, p_buffer, i_buffer);
-    unsigned i_bitflow = 0;
-    bs.p_fwpriv = &i_bitflow;
-    bs.pf_forward = hxxx_bsfw_ep3b_to_rbsp;  /* Does the emulated 3bytes conversion to rbsp */
-
-    /* first two bytes are the NAL header, 3rd and 4th are:
-        vps_video_parameter_set_id(4)
-        vps_reserved_3_2bis(2)
-        vps_max_layers_minus1(6)
-        vps_max_sub_layers_minus1(3)
-        vps_temporal_id_nesting_flags
-    */
-    bs_skip( &bs, 16 + 4 + 2 + 6 );
-    *numTemporalLayer = bs_read( &bs, 3 ) + 1;
-    *temporalIdNested = bs_read1( &bs );
-
-    /* 5th & 6th are reserved 0xffff */
-    bs_skip( &bs, 16 );
-    /* copy the first 12 bytes of profile tier */
-    for(unsigned i=0; i<12; i++)
-        general[i] = bs_read( &bs, 8 );
-}
-
-static inline void hevc_skip_profile_tiers_level( bs_t * bs, int32_t max_sub_layer_minus1 )
-{
-    uint8_t sub_layer_profile_present_flag[8];
-    uint8_t sub_layer_level_present_flag[8];
-
-    /* skipping useless fields of the VPS see https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-H.265-201304-I!!PDF-E&type=item */
-    bs_skip( bs, 2 + 1 + 5 + 32 + 1 + 1 + 1 + 1 + 44 + 8 );
-
-    for( int32_t i = 0; i < max_sub_layer_minus1; i++ )
-    {
-        sub_layer_profile_present_flag[i] = bs_read1( bs );
-        sub_layer_level_present_flag[i] = bs_read1( bs );
-    }
-
-    if(max_sub_layer_minus1 > 0)
-        bs_skip( bs, (8 - max_sub_layer_minus1) * 2 );
-
-    for( int32_t i = 0; i < max_sub_layer_minus1; i++ )
-    {
-        if( sub_layer_profile_present_flag[i] )
-            bs_skip( bs, 2 + 1 + 5 + 32 + 1 + 1 + 1 + 1 + 44 );
-        if( sub_layer_level_present_flag[i] )
-            bs_skip( bs, 8 );
-    }
-}
-
-static void hevcParseSPS(uint8_t * p_buffer, size_t i_buffer, uint8_t * chroma_idc,
-                         uint8_t *bit_depth_luma_minus8, uint8_t *bit_depth_chroma_minus8)
-{
-    if(i_buffer < 2)
-        return;
-
-    bs_t bs;
-    bs_init(&bs, p_buffer + 2, i_buffer - 2);
-    unsigned i_bitflow = 0;
-    bs.p_fwpriv = &i_bitflow;
-    bs.pf_forward = hxxx_bsfw_ep3b_to_rbsp;  /* Does the emulated 3bytes conversion to rbsp */
-
-    /* skip vps id */
-    bs_skip(&bs, 4);
-    uint32_t sps_max_sublayer_minus1 = bs_read(&bs, 3);
-
-    /* skip nesting flag */
-    bs_skip(&bs, 1);
-
-    hevc_skip_profile_tiers_level(&bs, sps_max_sublayer_minus1);
-
-    /* skip sps id */
-    (void) bs_read_ue( &bs );
-
-    *chroma_idc = bs_read_ue(&bs);
-    if (*chroma_idc == 3)
-        bs_skip(&bs, 1);
-
-    /* skip width and heigh */
-    (void) bs_read_ue( &bs );
-    (void) bs_read_ue( &bs );
-
-    uint32_t conformance_window_flag = bs_read1(&bs);
-    if (conformance_window_flag) {
-        /* skip offsets*/
-        (void) bs_read_ue(&bs);
-        (void) bs_read_ue(&bs);
-        (void) bs_read_ue(&bs);
-        (void) bs_read_ue(&bs);
-    }
-    *bit_depth_luma_minus8 = bs_read_ue(&bs);
-    *bit_depth_chroma_minus8 = bs_read_ue(&bs);
-}
-
 static bo_t *GetHvcCTag(es_format_t *p_fmt, bool b_completeness)
 {
     /* Generate hvcC box matching iso/iec 14496-15 3rd edition */
@@ -680,165 +580,80 @@ static bo_t *GetHvcCTag(es_format_t *p_fmt, bool b_completeness)
     if(!hvcC || !p_fmt->i_extra)
         return hvcC;
 
-    struct nal {
-        size_t i_buffer;
-        uint8_t * p_buffer;
-    };
-
-    struct nal rg_vps[HEVC_VPS_ID_MAX + 1], rg_sps[HEVC_SPS_ID_MAX + 1],
-               rg_pps[HEVC_PPS_ID_MAX + 1], *p_sei = NULL, *p_nal = NULL;
-    uint8_t i_vps = 0, i_sps = 0, i_pps = 0, i_num_arrays = 0;
-    size_t i_sei = 0;
-
-    uint8_t * p_buffer = p_fmt->p_extra;
-    size_t i_buffer = p_fmt->i_extra;
-
     /* Extradata is already an HEVCDecoderConfigurationRecord */
-    if(hevc_ishvcC(p_buffer, i_buffer))
+    if(hevc_ishvcC(p_fmt->p_extra, p_fmt->i_extra))
     {
-        (void) bo_add_mem(hvcC, i_buffer, p_buffer);
+        (void) bo_add_mem(hvcC, p_fmt->i_extra, p_fmt->p_extra);
         return hvcC;
     }
 
-    uint8_t general_configuration[12] = {0};
-    uint8_t i_numTemporalLayer = 0;
-    uint8_t i_chroma_idc = 1;
-    uint8_t i_bit_depth_luma_minus8 = 0;
-    uint8_t i_bit_depth_chroma_minus8 = 0;
-    bool b_temporalIdNested = false;
+    struct hevc_dcr_params params = { };
+    const uint8_t *p_nal;
+    size_t i_nal;
 
-    uint32_t cmp = 0xFFFFFFFF;
-    while (i_buffer) {
-        /* look for start code 0X0000001 */
-        while (i_buffer) {
-            cmp = (cmp << 8) | *p_buffer;
-            if((cmp ^ UINT32_C(0x100)) <= UINT32_C(0xFF))
-                break;
-            p_buffer++;
-            i_buffer--;
-        }
-        if (p_nal)
-            p_nal->i_buffer = p_buffer - p_nal->p_buffer - ((i_buffer)?3:0);
-
-        switch (hevc_getNALType(p_buffer)) {
-
-        case HEVC_NAL_VPS:
-            if(i_vps > HEVC_VPS_ID_MAX)
-                break;
-            p_nal = &rg_vps[i_vps++];
-            p_nal->p_buffer = p_buffer;
-            /* Only keep the general profile from the first VPS
-             * if there are several (this shouldn't happen so soon) */
-            if (i_vps == 1) {
-                hevcParseVPS(p_buffer, i_buffer, general_configuration,
-                             &i_numTemporalLayer, &b_temporalIdNested);
-                i_num_arrays++;
-            }
-            break;
-
-        case HEVC_NAL_SPS: {
-            if(i_sps > HEVC_SPS_ID_MAX)
-                break;
-            p_nal = &rg_sps[i_sps++];
-            p_nal->p_buffer = p_buffer;
-            if (i_sps == 1 && i_buffer > 15) {
-                /* Get Chroma_idc and bitdepths */
-                hevcParseSPS(p_buffer, i_buffer, &i_chroma_idc,
-                             &i_bit_depth_luma_minus8, &i_bit_depth_chroma_minus8);
-                i_num_arrays++;
-            }
-            break;
-            }
-
-        case HEVC_NAL_PPS: {
-            if(i_pps > HEVC_PPS_ID_MAX)
-                break;
-            p_nal = &rg_pps[i_pps++];
-            p_nal->p_buffer = p_buffer;
-            if (i_pps == 1)
-                i_num_arrays++;
-            break;
-            }
-
-        case HEVC_NAL_PREF_SEI:
-        case HEVC_NAL_SUFF_SEI: {
-            struct nal * p_tmp =  realloc(p_sei, sizeof(struct nal) * (i_sei + 1));
-            if (!p_tmp)
-                break;
-            p_sei = p_tmp;
-            p_nal = &p_sei[i_sei++];
-            p_nal->p_buffer = p_buffer;
-            if(i_sei == 1)
-                i_num_arrays++;
-            break;
-        }
-        default:
-            p_nal = NULL;
-            break;
-        }
-    }
-    bo_add_8(hvcC, 0x01);
-    bo_add_mem(hvcC, 12, general_configuration);
-    /* Don't set min spatial segmentation */
-    bo_add_16be(hvcC, 0xF000);
-    /* Don't set parallelism type since segmentation isn't set */
-    bo_add_8(hvcC, 0xFC);
-    bo_add_8(hvcC, (0xFC | (i_chroma_idc & 0x03)));
-    bo_add_8(hvcC, (0xF8 | (i_bit_depth_luma_minus8 & 0x07)));
-    bo_add_8(hvcC, (0xF8 | (i_bit_depth_chroma_minus8 & 0x07)));
-
-    /* Don't set framerate */
-    bo_add_16be(hvcC, 0x0000);
-    /* Force NAL size of 4 bytes that replace the startcode */
-    bo_add_8(hvcC, (((i_numTemporalLayer & 0x07) << 3) |
-                    (b_temporalIdNested << 2) | 0x03));
-    bo_add_8(hvcC, i_num_arrays);
-
-    if (i_vps)
+    hxxx_iterator_ctx_t it;
+    hxxx_iterator_init(&it, p_fmt->p_extra, p_fmt->i_extra, 0);
+    while(hxxx_annexb_iterate_next(&it, &p_nal, &i_nal))
     {
-        /* Write VPS */
-        bo_add_8(hvcC, HEVC_NAL_VPS | (b_completeness ? 0x80 : 0));
-        bo_add_16be(hvcC, i_vps);
-        for (uint8_t i = 0; i < i_vps; i++) {
-            p_nal = &rg_vps[i];
-            bo_add_16be(hvcC, p_nal->i_buffer);
-            bo_add_mem(hvcC, p_nal->i_buffer, p_nal->p_buffer);
+        switch (hevc_getNALType(p_nal))
+        {
+            case HEVC_NAL_VPS:
+                if(params.i_vps_count != HEVC_DCR_VPS_COUNT)
+                {
+                    params.p_vps[params.i_vps_count] = p_nal;
+                    params.rgi_vps[params.i_vps_count] = i_nal;
+                    params.i_vps_count++;
+                }
+                break;
+            case HEVC_NAL_SPS:
+                if(params.i_sps_count != HEVC_DCR_SPS_COUNT)
+                {
+                    params.p_sps[params.i_sps_count] = p_nal;
+                    params.rgi_sps[params.i_sps_count] = i_nal;
+                    params.i_sps_count++;
+                }
+                break;
+            case HEVC_NAL_PPS:
+                if(params.i_pps_count != HEVC_DCR_PPS_COUNT)
+                {
+                    params.p_pps[params.i_pps_count] = p_nal;
+                    params.rgi_pps[params.i_pps_count] = i_nal;
+                    params.i_pps_count++;
+                }
+                break;
+            case HEVC_NAL_PREF_SEI:
+                if(params.i_seipref_count != HEVC_DCR_SEI_COUNT)
+                {
+                    params.p_seipref[params.i_seipref_count] = p_nal;
+                    params.rgi_seipref[params.i_seipref_count] = i_nal;
+                    params.i_seipref_count++;
+                }
+                break;
+            case HEVC_NAL_SUFF_SEI:
+                if(params.i_seisuff_count != HEVC_DCR_SEI_COUNT)
+                {
+                    params.p_seisuff[params.i_seisuff_count] = p_nal;
+                    params.rgi_seisuff[params.i_seisuff_count] = i_nal;
+                    params.i_seisuff_count++;
+                }
+                break;
+
+            default:
+                break;
         }
     }
 
-    if (i_sps) {
-        /* Write SPS */
-        bo_add_8(hvcC, HEVC_NAL_SPS | (b_completeness ? 0x80 : 0));
-        bo_add_16be(hvcC, i_sps);
-        for (uint8_t i = 0; i < i_sps; i++) {
-            p_nal = &rg_sps[i];
-            bo_add_16be(hvcC, p_nal->i_buffer);
-            bo_add_mem(hvcC, p_nal->i_buffer, p_nal->p_buffer);
-        }
+    size_t i_dcr;
+    uint8_t *p_dcr = hevc_create_dcr(&params, 4, b_completeness, &i_dcr);
+    if(!p_dcr)
+    {
+        bo_free(hvcC);
+        return NULL;
     }
 
-    if (i_pps) {
-        /* Write PPS */
-        bo_add_8(hvcC, HEVC_NAL_PPS | (b_completeness ? 0x80 : 0));
-        bo_add_16be(hvcC, i_pps);
-        for (uint8_t i = 0; i < i_pps; i++) {
-            p_nal = &rg_pps[i];
-            bo_add_16be(hvcC, p_nal->i_buffer);
-            bo_add_mem(hvcC, p_nal->i_buffer, p_nal->p_buffer);
-        }
-    }
+    bo_add_mem(hvcC, i_dcr, p_dcr);
+    free(p_dcr);
 
-    if (i_sei) {
-        /* Write SEI */
-        bo_add_8(hvcC, HEVC_NAL_PREF_SEI | (b_completeness ? 0x80 : 0));
-        bo_add_16be(hvcC, i_sei);
-        for (size_t i = 0; i < i_sei; i++) {
-            p_nal = &p_sei[i];
-            bo_add_16be(hvcC, p_nal->i_buffer);
-            bo_add_mem(hvcC, p_nal->i_buffer, p_nal->p_buffer);
-        }
-    }
-    free(p_sei);
     return hvcC;
 }
 
@@ -1206,34 +1021,129 @@ static bo_t *GetVideBox(vlc_object_t *p_obj, mp4mux_trackinfo_t *p_track, bool b
     return vide;
 }
 
-static bo_t *GetTextBox(void)
+static bo_t *GetTextBox(vlc_object_t *p_obj, mp4mux_trackinfo_t *p_track, bool b_mov)
 {
-    bo_t *text = box_new("text");
-    if(!text)
-        return NULL;
+    VLC_UNUSED(p_obj);
+    if(p_track->fmt.i_codec == VLC_CODEC_QTXT)
+    {
+        bo_t *text = box_new("text");
+        if(!text)
+            return NULL;
 
-    for (int i = 0; i < 6; i++)
-        bo_add_8(text, 0);        // reserved;
-    bo_add_16be(text, 1);         // data-reference-index
+        /* Sample Entry Header */
+        for (int i = 0; i < 6; i++)
+            bo_add_8(text, 0);        // reserved;
+        bo_add_16be(text, 1);         // data-reference-index
 
-    bo_add_32be(text, 0);         // display flags
-    bo_add_32be(text, 0);         // justification
-    for (int i = 0; i < 3; i++)
-        bo_add_16be(text, 0);     // back ground color
+        if(p_track->fmt.i_extra >= 44)
+        {
+            /* Copy the original sample description format */
+            bo_add_mem(text, p_track->fmt.i_extra, p_track->fmt.p_extra);
+        }
+        else
+        {
+            for (int i = 0; i < 6; i++)
+                bo_add_8(text, 0);        // reserved;
+            bo_add_16be(text, 1);         // data-reference-index
 
-    bo_add_16be(text, 0);         // box text
-    bo_add_16be(text, 0);         // box text
-    bo_add_16be(text, 0);         // box text
-    bo_add_16be(text, 0);         // box text
+            bo_add_32be(text, 0);         // display flags
+            bo_add_32be(text, 0);         // justification
+            for (int i = 0; i < 3; i++)
+                bo_add_16be(text, 0);     // background color
 
-    bo_add_64be(text, 0);         // reserved
-    for (int i = 0; i < 3; i++)
-        bo_add_16be(text, 0xff);  // foreground color
+            bo_add_64be(text, 0);         // box text
+            bo_add_64be(text, 0);         // reserved
 
-    bo_add_8 (text, 9);
-    bo_add_mem(text, 9, (uint8_t*)"Helvetica");
+            bo_add_16be(text, 0);         // font-number
+            bo_add_16be(text, 0);         // font-face
+            bo_add_8(text, 0);            // reserved
+            bo_add_16be(text, 0);         // reserved
 
-    return text;
+            for (int i = 0; i < 3; i++)
+                bo_add_16be(text, 0xff);  // foreground color
+
+            bo_add_8(text, 5);
+            bo_add_mem(text, 5,  (void*)"Serif");
+        }
+        return text;
+    }
+    else if(p_track->fmt.i_codec == VLC_CODEC_SPU ||
+            p_track->fmt.i_codec == VLC_CODEC_TX3G)
+    {
+        bo_t *tx3g = box_new("tx3g");
+        if(!tx3g)
+            return NULL;
+
+        /* Sample Entry Header */
+        for (int i = 0; i < 6; i++)
+            bo_add_8(tx3g, 0);        // reserved;
+        bo_add_16be(tx3g, 1);         // data-reference-index
+
+        if(p_track->fmt.i_codec == VLC_CODEC_TX3G &&
+           p_track->fmt.i_extra >= 32)
+        {
+            /* Copy the original sample description format */
+            bo_add_mem(tx3g, p_track->fmt.i_extra, p_track->fmt.p_extra);
+        }
+        else /* Build TTXT(tx3g) sample desc */
+        {
+            /* tx3g sample description */
+            bo_add_32be(tx3g, 0);         // display flags
+            bo_add_16be(tx3g, 0);         // justification
+
+            bo_add_32be(tx3g, 0);         // background color
+
+            /* BoxRecord */
+            bo_add_64be(tx3g, 0);
+
+            /* StyleRecord*/
+            bo_add_16be(tx3g, 0);         // startChar
+            bo_add_16be(tx3g, 0);         // endChar
+            bo_add_16be(tx3g, 0);         // default font ID
+            bo_add_8(tx3g, 0);            // face style flags
+            bo_add_8(tx3g, STYLE_DEFAULT_FONT_SIZE);  // font size
+            bo_add_32be(tx3g, 0xFFFFFFFFU);// foreground color
+
+            /* FontTableBox */
+            bo_t *ftab = box_new("ftab");
+            if(ftab)
+            {
+                bo_add_16be(ftab, b_mov ? 2 : 3); // Entry Count
+                /* Font Record */
+                bo_add_8(ftab, 5);
+                bo_add_mem(ftab, 5,  (void*)"Serif");
+                bo_add_8(ftab, 10);
+                bo_add_mem(ftab, 10, (void*) (b_mov ? "Sans-Serif" : "Sans-serif"));
+                if(!b_mov) /* qt only allows "Serif" and "Sans-Serif" */
+                {
+                    bo_add_8(ftab, 9);
+                    bo_add_mem(ftab, 9,  (void*)"Monospace");
+                }
+
+                box_gather(tx3g, ftab);
+            }
+        }
+
+        return tx3g;
+    }
+    else if(p_track->fmt.i_codec == VLC_CODEC_WEBVTT)
+    {
+        bo_t *wvtt = box_new("wvtt");
+        if(!wvtt)
+            return NULL;
+
+        /* Sample Entry Header */
+        for (int i = 0; i < 6; i++)
+            bo_add_8(wvtt, 0);        // reserved;
+        bo_add_16be(wvtt, 1);         // data-reference-index
+
+        bo_t *ftab = box_new("vttc");
+        box_gather(wvtt, ftab);
+
+        return wvtt;
+    }
+
+    return NULL;
 }
 
 static int64_t GetScaledEntryDuration( const mp4mux_entry_t *p_entry, uint32_t i_timescale,
@@ -1262,7 +1172,7 @@ static bo_t *GetStblBox(vlc_object_t *p_obj, mp4mux_trackinfo_t *p_track, bool b
     else if (p_track->fmt.i_cat == VIDEO_ES)
         box_gather(stsd, GetVideBox(p_obj, p_track, b_mov));
     else if (p_track->fmt.i_cat == SPU_ES)
-        box_gather(stsd, GetTextBox());
+        box_gather(stsd, GetTextBox(p_obj, p_track, b_mov));
 
     /* chunk offset table */
     bo_t *stco;
@@ -1468,7 +1378,7 @@ static bo_t *GetStblBox(vlc_object_t *p_obj, mp4mux_trackinfo_t *p_track, bool b
         box_gather(stbl, ctts);
     box_gather(stbl, stsc);
     box_gather(stbl, stsz);
-    p_track->i_stco_pos = stbl->b->i_buffer + 16;
+    p_track->i_stco_pos = bo_size(stbl) + 16;
     box_gather(stbl, stco);
 
     return stbl;
@@ -1724,7 +1634,15 @@ bo_t * mp4mux_GetMoovBox(vlc_object_t *p_obj, mp4mux_trackinfo_t **pp_tracks, un
         else if (p_stream->fmt.i_cat == VIDEO_ES)
             bo_add_fourcc(hdlr, "vide");
         else if (p_stream->fmt.i_cat == SPU_ES)
-            bo_add_fourcc(hdlr, "text");
+        {
+            /* text/tx3g 3GPP */
+            /* sbtl/tx3g Apple subs */
+            /* text/text Apple textmedia */
+            if(p_stream->fmt.i_codec == VLC_CODEC_TX3G)
+                bo_add_fourcc(hdlr, (b_mov) ? "sbtl" : "text");
+            else
+                bo_add_fourcc(hdlr, "text");
+        }
 
         bo_add_32be(hdlr, 0);         // reserved
         bo_add_32be(hdlr, 0);         // reserved
@@ -1774,22 +1692,28 @@ bo_t * mp4mux_GetMoovBox(vlc_object_t *p_obj, mp4mux_trackinfo_t **pp_tracks, un
                 box_gather(minf, vmhd);
             }
         } else if (p_stream->fmt.i_cat == SPU_ES) {
-            bo_t *gmin = box_full_new("gmin", 0, 1);
-            if(gmin)
+            if(b_mov &&
+               (p_stream->fmt.i_codec == VLC_CODEC_SUBT||
+                p_stream->fmt.i_codec == VLC_CODEC_TX3G||
+                p_stream->fmt.i_codec == VLC_CODEC_QTXT))
             {
-                bo_add_16be(gmin, 0);     // graphicsmode
-                for (int i = 0; i < 3; i++)
-                    bo_add_16be(gmin, 0); // opcolor
-                bo_add_16be(gmin, 0);     // balance
-                bo_add_16be(gmin, 0);     // reserved
-
-                bo_t *gmhd = box_new("gmhd");
-                if(gmhd)
+                bo_t *gmin = box_full_new("gmin", 0, 1);
+                if(gmin)
                 {
-                    box_gather(gmhd, gmin);
-                    box_gather(minf, gmhd);
+                    bo_add_16be(gmin, 0);     // graphicsmode
+                    for (int i = 0; i < 3; i++)
+                        bo_add_16be(gmin, 0); // opcolor
+                    bo_add_16be(gmin, 0);     // balance
+                    bo_add_16be(gmin, 0);     // reserved
+
+                    bo_t *gmhd = box_new("gmhd");
+                    if(gmhd)
+                    {
+                        box_gather(gmhd, gmin);
+                        box_gather(minf, gmhd);
+                    }
+                    else bo_free(gmin);
                 }
-                else bo_free(gmin);
             }
         }
 
@@ -1827,19 +1751,19 @@ bo_t * mp4mux_GetMoovBox(vlc_object_t *p_obj, mp4mux_trackinfo_t **pp_tracks, un
             stbl = GetStblBox(p_obj, p_stream, b_mov, b_stco64);
 
         /* append stbl to minf */
-        p_stream->i_stco_pos += minf->b->i_buffer;
+        p_stream->i_stco_pos += bo_size(minf);
         box_gather(minf, stbl);
 
         /* append minf to mdia */
-        p_stream->i_stco_pos += mdia->b->i_buffer;
+        p_stream->i_stco_pos += bo_size(mdia);
         box_gather(mdia, minf);
 
         /* append mdia to trak */
-        p_stream->i_stco_pos += trak->b->i_buffer;
+        p_stream->i_stco_pos += bo_size(trak);
         box_gather(trak, mdia);
 
         /* append trak to moov */
-        p_stream->i_stco_pos += moov->b->i_buffer;
+        p_stream->i_stco_pos += bo_size(moov);
         box_gather(moov, trak);
     }
 
@@ -1889,7 +1813,7 @@ bo_t * mp4mux_GetMoovBox(vlc_object_t *p_obj, mp4mux_trackinfo_t **pp_tracks, un
     }
 
     if(moov->b)
-        box_fix(moov, moov->b->i_buffer);
+        box_fix(moov, bo_size(moov));
     return moov;
 }
 
@@ -1907,13 +1831,15 @@ bo_t *mp4mux_GetFtyp(vlc_fourcc_t major, uint32_t minor, vlc_fourcc_t extra[], s
             free(box);
             return NULL;
         }
-        box_fix(box, box->b->i_buffer);
+        box_fix(box, bo_size(box));
     }
     return box;
 }
 
-bool mp4mux_CanMux(vlc_object_t *p_obj, const es_format_t *p_fmt)
+bool mp4mux_CanMux(vlc_object_t *p_obj, const es_format_t *p_fmt,
+                   bool b_fragmented, bool b_mov)
 {
+    VLC_UNUSED(b_mov);
     switch(p_fmt->i_codec)
     {
     case VLC_CODEC_A52:
@@ -1944,12 +1870,19 @@ bool mp4mux_CanMux(vlc_object_t *p_obj, const es_format_t *p_fmt)
         break;
     case VLC_CODEC_HEVC:
         if(!p_fmt->i_extra && p_obj)
+        {
             msg_Err(p_obj, "HEVC muxing from AnnexB source is unsupported");
-        return false;
+            return false;
+        }
+        break;
     case VLC_CODEC_SUBT:
         if(p_obj)
             msg_Warn(p_obj, "subtitle track added like in .mov (even when creating .mp4)");
-        break;
+        return !b_fragmented;
+    case VLC_CODEC_QTXT:
+    case VLC_CODEC_TX3G:
+    case VLC_CODEC_WEBVTT:
+        return !b_fragmented;
     default:
         return false;
     }

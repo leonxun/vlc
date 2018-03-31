@@ -37,6 +37,9 @@
 #include <QFileDialog>
 #include <QCheckBox>
 
+#define urlToDisplayString(filestr) toNativeSeparators(QUrl(filestr).toDisplayString(\
+    QUrl::RemovePassword | QUrl::PreferLocalFile | QUrl::NormalizePathSegments ))
+
 ConvertDialog::ConvertDialog( QWidget *parent, intf_thread_t *_p_intf,
                               const QStringList& inputMRLs )
               : QVLCDialog( parent, _p_intf ),
@@ -55,7 +58,7 @@ ConvertDialog::ConvertDialog( QWidget *parent, intf_thread_t *_p_intf,
     }
     else
     {
-        inputBox->setMRL("Multiple files selected.");
+        inputBox->setMRL( qtr( "Multiple files selected." ) );
     }
     mainLayout->addWidget( inputBox, 0, 0, 1, -1  );
 
@@ -71,6 +74,7 @@ ConvertDialog::ConvertDialog( QWidget *parent, intf_thread_t *_p_intf,
     fileLine = new QLineEdit;
     fileLine->setMinimumWidth( 300 );
     fileLine->setFocus( Qt::ActiveWindowFocusReason );
+    fileLine->setReadOnly(true);
     destLabel->setBuddy( fileLine );
     // You can set a specific name for only one file.
     if(singleFileSelected)
@@ -83,10 +87,10 @@ ConvertDialog::ConvertDialog( QWidget *parent, intf_thread_t *_p_intf,
     // but multiple files follow a naming convention
     else
     {
-        fileLine->setText("Multiple Files Selected.");
+        fileLine->setText( qtr( "Multiple Files Selected." ) );
         fileLine->setReadOnly(true);
-        fileLine->setToolTip("Files will be placed in the same directory "
-                "with the same name.");
+        fileLine->setToolTip( qtr( "Files will be placed in the same directory "
+                "with the same name." ) );
 
         appendBox = new QCheckBox( qtr( "Append '-converted' to filename" ) );
         destLayout->addWidget( appendBox, 1, 0 );
@@ -154,11 +158,11 @@ void ConvertDialog::fileBrowse()
 {
     QString fileExtension = ( ! profile->isEnabled() ) ? ".*" : "." + profile->getMux();
 
-    QString fileName = QFileDialog::getSaveFileName( this, qtr( "Save file..." ),
+    outgoingMRL = QFileDialog::getSaveFileUrl( this, qtr( "Save file..." ),
         p_intf->p_sys->filepath,
         QString( "%1 (*%2);;%3 (*.*)" ).arg( qtr( "Containers" ) )
             .arg( fileExtension ).arg( qtr("All") ), 0, QFileDialog::DontConfirmOverwrite );
-    fileLine->setText( toNativeSeparators( fileName ) );
+    fileLine->setText( urlToDisplayString( outgoingMRL ) );
     setDestinationFileExtension();
 }
 
@@ -174,10 +178,13 @@ void ConvertDialog::close()
     for(int i = 0; i < incomingMRLs->length(); i++)
     {
         QString mrl;
+        QString newFileName;
 
         if( dumpRadio->isChecked() )
         {
-            mrl = "demux=dump :demuxdump-file=" + fileLine->text();
+            newFileName = fileLine->text();
+            newFileName.replace( QChar('\''), "\\\'" );
+            mrl = QString( "demux=dump :demuxdump-file='%1'" ).arg( newFileName );
         }
         else
         {
@@ -188,17 +195,11 @@ void ConvertDialog::close()
                 mrl += ",deinterlace}";
             }
             mrl += ":";
-            if( displayBox->isChecked() )
-            {
-                mrl += "duplicate{dst=display,dst=";
-            }
-
-            QString newFileName;
 
             // Only one file, use the destination provided
             if(singleFileSelected)
             {
-                newFileName = fileLine->text();
+                newFileName = outgoingMRL.toLocalFile();
             }
 
             // Multiple, use the convention.
@@ -209,7 +210,7 @@ void ConvertDialog::close()
                 newFileName = incomingMRLs->at(i);
 
                 // Remove the file:// from the front of our MRL
-                newFileName = newFileName.remove(0,7);
+                newFileName = QUrl(newFileName).toLocalFile();
 
                 // Remote the existing extention (if any)
                 int extentionPos = newFileName.lastIndexOf('.');
@@ -230,11 +231,12 @@ void ConvertDialog::close()
 
             newFileName.replace( QChar('\''), "\\\'" );
 
-            mrl += "std{access=file{no-overwrite},mux=" + profile->getMux()
-                 + ",dst='" + newFileName
-                 + "'}";
+            QString chain = QString("std{access=file{no-overwrite},mux=%1,dst='%2'}")
+                                    .arg( profile->getMux() ).arg( newFileName );
             if( displayBox->isChecked() )
-                mrl += "}";
+                mrl += QString( "duplicate{dst=display,dst=%1}" ).arg( chain );
+            else
+                mrl += chain;
         }
         msg_Dbg( p_intf, "Transcode MRL: %s", qtu( mrl ) );
         mrls.append(mrl);
@@ -244,13 +246,14 @@ void ConvertDialog::close()
 
 void ConvertDialog::setDestinationFileExtension()
 {
-    if( !fileLine->text().isEmpty() && profile->isEnabled() )
+    if( !outgoingMRL.isEmpty() && profile->isEnabled() )
     {
-        QString newFileExtension = "." + profile->getMux();
-        if( fileLine->text().lastIndexOf( "." ) == -1 )
+        QString filepath = outgoingMRL.path(QUrl::FullyEncoded);
+        if( filepath.lastIndexOf( "." ) == -1 )
         {
-            QString newFileName = fileLine->text().append( newFileExtension );
-            fileLine->setText( toNativeSeparators( newFileName ) );
+            QString newFileExtension = "." + profile->getMux();
+            outgoingMRL.setPath(filepath + newFileExtension);
+            fileLine->setText( urlToDisplayString( outgoingMRL ) );
         }
     }
 }

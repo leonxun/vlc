@@ -18,11 +18,6 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
 
-#if !defined(_WIN32_WINNT) || _WIN32_WINNT < _WIN32_WINNT_VISTA
-# undef _WIN32_WINNT
-# define _WIN32_WINNT _WIN32_WINNT_VISTA
-#endif
-
 #ifdef HAVE_CONFIG_H
 # include <config.h>
 #endif
@@ -428,7 +423,6 @@ static int vlc_FromWave(const WAVEFORMATEX *restrict wf,
     else
         return -1;
 
-    audio->i_original_channels = audio->i_physical_channels;
     aout_FormatPrepare (audio);
 
     if (wf->nChannels != audio->i_channels)
@@ -451,8 +445,8 @@ static unsigned vlc_CheckWaveOrder (const WAVEFORMATEX *restrict wf,
 }
 
 
-static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
-                       const GUID *sid, bool force_dts_spdif)
+static HRESULT Start(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
+                     const GUID *sid)
 {
     static INIT_ONCE freq_once = INIT_ONCE_STATIC_INIT;
 
@@ -464,6 +458,27 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
         return E_OUTOFMEMORY;
     sys->client = NULL;
 
+    /* Configure audio stream */
+    WAVEFORMATEXTENSIBLE_IEC61937 wf_iec61937;
+    WAVEFORMATEXTENSIBLE *pwfe = &wf_iec61937.FormatExt;
+    WAVEFORMATEX *pwf = &pwfe->Format, *pwf_closest, *pwf_mix = NULL;
+    AUDCLNT_SHAREMODE shared_mode;
+    REFERENCE_TIME buffer_duration;
+    audio_sample_format_t fmt = *pfmt;
+    bool b_spdif = AOUT_FMT_SPDIF(&fmt);
+    bool b_hdmi = AOUT_FMT_HDMI(&fmt);
+    bool b_dtshd = false;
+
+    if (fmt.i_format == VLC_CODEC_DTS)
+    {
+        b_dtshd = var_GetBool(s->obj.parent, "dtshd");
+        if (b_dtshd)
+        {
+            b_hdmi = true;
+            b_spdif = false;
+        }
+    }
+
     void *pv;
     HRESULT hr = aout_stream_Activate(s, &IID_IAudioClient, NULL, &pv);
     if (FAILED(hr))
@@ -472,27 +487,6 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
         goto error;
     }
     sys->client = pv;
-
-    /* Configure audio stream */
-    WAVEFORMATEXTENSIBLE_IEC61937 wf_iec61937;
-    WAVEFORMATEXTENSIBLE *pwfe = &wf_iec61937.FormatExt;
-    WAVEFORMATEX *pwf = &pwfe->Format, *pwf_closest;
-    AUDCLNT_SHAREMODE shared_mode;
-    REFERENCE_TIME buffer_duration;
-    audio_sample_format_t fmt = *pfmt;
-
-    bool b_spdif = AOUT_FMT_SPDIF(&fmt);
-    bool b_hdmi = AOUT_FMT_HDMI(&fmt);
-    if (b_spdif && !b_hdmi && fmt.i_format == VLC_CODEC_DTS && !force_dts_spdif
-     && fmt.i_rate >= 48000)
-    {
-        /* Try to configure the output rate (IEC958 rate) at 768kHz. Indeed,
-         * DTS-HD (and other DTS extensions like DTS-X) can only be transmitted
-         * at 768kHz. We'll also be able to transmit DTS-Core only at this
-         * rate. */
-        b_spdif = false;
-        b_hdmi = true;
-    }
 
     if (b_spdif)
     {
@@ -510,9 +504,28 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
     }
     else if (AOUT_FMT_LINEAR(&fmt))
     {
-        vlc_ToWave(pwfe, &fmt);
         shared_mode = AUDCLNT_SHAREMODE_SHARED;
-        buffer_duration = AOUT_MAX_PREPARE_TIME * 10;
+
+        if (fmt.channel_type == AUDIO_CHANNEL_TYPE_AMBISONICS)
+        {
+            fmt.channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
+
+            /* Render Ambisonics on the native mix format */
+            hr = IAudioClient_GetMixFormat(sys->client, &pwf_mix);
+            if (FAILED(hr) || vlc_FromWave(pwf_mix, &fmt))
+                vlc_ToWave(pwfe, &fmt); /* failed, fallback to default */
+            else
+                pwf = pwf_mix;
+
+            /* Setup low latency in order to quickly react to ambisonics filters
+             * viewpoint changes. */
+            buffer_duration = AOUT_MIN_PREPARE_TIME;
+        }
+        else
+        {
+            vlc_ToWave(pwfe, &fmt);
+            buffer_duration = AOUT_MAX_PREPARE_TIME * 10;
+        }
     }
     else
     {
@@ -528,10 +541,11 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
         if (pfmt->i_format == VLC_CODEC_DTS && b_hdmi)
         {
             msg_Warn(s, "cannot negotiate DTS at 768khz IEC958 rate (HDMI), "
-                     "fallback to 48kHz (S/PDIF)");
+                     "fallback to 48kHz (S/PDIF) (error 0x%lx)", hr);
             IAudioClient_Release(sys->client);
             free(sys);
-            return Restart(s, pfmt, sid, true);
+            var_SetBool(s->obj.parent, "dtshd", false);
+            return Start(s, pfmt, sid);
         }
         msg_Err(s, "cannot negotiate audio format (error 0x%lx)%s", hr,
                 hr == AUDCLNT_E_UNSUPPORTED_FORMAT
@@ -589,6 +603,7 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
         msg_Dbg(s, "minimum period : %"PRIu64"00 ns", minT);
     }
 
+    CoTaskMemFree(pwf_mix);
     *pfmt = fmt;
     sys->written = 0;
     s->sys = sys;
@@ -598,16 +613,11 @@ static HRESULT Restart(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
     s->flush = Flush;
     return S_OK;
 error:
+    CoTaskMemFree(pwf_mix);
     if (sys->client != NULL)
         IAudioClient_Release(sys->client);
     free(sys);
     return hr;
-}
-
-static HRESULT Start(aout_stream_t *s, audio_sample_format_t *restrict pfmt,
-                     const GUID *sid)
-{
-    return Restart(s, pfmt, sid, false);
 }
 
 static void Stop(aout_stream_t *s)

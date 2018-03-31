@@ -33,6 +33,9 @@
 #include "util/timetooltip.hpp"
 #include "adapters/seekpoints.hpp"
 #include "input_manager.hpp"
+#include "imagehelper.hpp"
+
+#include <vlc_actions.h>
 
 #include <QPaintEvent>
 #include <QPainter>
@@ -49,6 +52,7 @@
 #include <QPropertyAnimation>
 #include <QApplication>
 #include <QDebug>
+#include <QScreen>
 #include <QSequentialAnimationGroup>
 
 namespace {
@@ -61,8 +65,8 @@ namespace {
     int const FADEOUT_DELAY = 2000;
 }
 
-SeekSlider::SeekSlider( Qt::Orientation q, QWidget *_parent, bool _static )
-          : QSlider( q, _parent ), b_classic( _static ), animLoading( NULL )
+SeekSlider::SeekSlider( intf_thread_t *p_intf, Qt::Orientation q, QWidget *_parent, bool _static )
+          : QSlider( q, _parent ), p_intf( p_intf ), b_classic( _static ), animLoading( NULL )
 {
     isSliding = false;
     isJumping = false;
@@ -199,14 +203,16 @@ void SeekSlider::setChapters( SeekPoints *chapters_ )
 void SeekSlider::setPosition( float pos, int64_t time, int length )
 {
     VLC_UNUSED(time);
-    if( pos == -1.0 )
+    if( pos == -1.0  || ! b_seekable )
     {
         setEnabled( false );
         mTimeTooltip->hide();
         isSliding = false;
+        setValue( 0 );
+        return;
     }
     else
-        setEnabled( b_seekable );
+        setEnabled( true );
 
     if( !isSliding )
     {
@@ -397,11 +403,10 @@ void SeekSlider::wheelEvent( QWheelEvent *event )
     /* Don't do anything if we are for somehow reason sliding */
     if( !isSliding && isEnabled() )
     {
-        setValue( value() + event->delta() / 12 ); /* 12 = 8 * 15 / 10
-         Since delta is in 1/8 of ° and mouse have steps of 15 °
-         and that our slider is in 0.1% and we want one step to be a 1%
-         increment of position */
-        emit sliderDragged( value() / static_cast<float>( maximum() ) );
+        if ( event->delta() > 0 )
+            var_SetInteger( p_intf->obj.libvlc, "key-action", ACTIONID_JUMP_BACKWARD_SHORT );
+        else
+            var_SetInteger( p_intf->obj.libvlc, "key-action", ACTIONID_JUMP_FORWARD_SHORT );
     }
     event->accept();
 }
@@ -573,8 +578,10 @@ void SeekSlider::startAnimLoading()
     - Mark Kretschmann
     - Gábor Lehel
    */
-#define WLENGTH   80 // px
-#define WHEIGHT   22  // px
+#define WLENGTH   85  // px
+#define WHEIGHT   26  // px
+#define PADDINGL  6   // px
+#define PADDINGR  6   // px
 #define SOUNDMIN  0   // %
 
 SoundSlider::SoundSlider( QWidget *_parent, float _i_step,
@@ -589,19 +596,23 @@ SoundSlider::SoundSlider( QWidget *_parent, float _i_step,
     b_mouseOutside = true;
     b_isMuted = false;
 
-    pixOutside = QPixmap( ":/toolbar/volslide-outside" );
+    setFixedSize( WLENGTH, WHEIGHT );
 
-    const QPixmap temp( ":/toolbar/volslide-inside" );
+    pixOutside = ImageHelper::loadSvgToPixmap(":/toolbar/volslide-outside.svg", width(), height() );
+
+    const QPixmap temp = ImageHelper::loadSvgToPixmap(":/toolbar/volslide-inside.svg", width(), height() );
     const QBitmap mask( temp.createHeuristicMask() );
 
-    setFixedSize( pixOutside.size() );
-
-    pixGradient = QPixmap( mask.size() );
-    pixGradient2 = QPixmap( mask.size() );
+    pixGradient = QPixmap( pixOutside.size() );
+    pixGradient2 = QPixmap( pixOutside.size() );
+#if HAS_QT56
+    pixGradient.setDevicePixelRatio(QApplication::primaryScreen()->devicePixelRatio());
+    pixGradient2.setDevicePixelRatio(QApplication::primaryScreen()->devicePixelRatio());
+#endif
 
     /* Gradient building from the preferences */
-    QLinearGradient gradient( paddingL, 2, WLENGTH + paddingL , 2 );
-    QLinearGradient gradient2( paddingL, 2, WLENGTH + paddingL , 2 );
+    QLinearGradient gradient( PADDINGL, 2, width() - PADDINGR, 2 );
+    QLinearGradient gradient2( PADDINGL, 2, width()- PADDINGR, 2 );
 
     QStringList colorList = qfu( psz_colors ).split( ";" );
     free( psz_colors );
@@ -677,7 +688,7 @@ void SoundSlider::mousePressEvent( QMouseEvent *event )
         isSliding = true;
         i_oldvalue = value();
         emit sliderPressed();
-        changeValue( event->x() - paddingL );
+        changeValue( event->x() );
         emit sliderMoved( value() );
     }
 }
@@ -708,8 +719,8 @@ void SoundSlider::mouseMoveEvent( QMouseEvent *event )
 
     if( isSliding )
     {
-        QRect rect( paddingL - 15,    -1,
-                    WLENGTH + 15 * 2 , WHEIGHT + 5 );
+        QRect rect( PADDINGL - 15,    -1,
+                    width() - PADDINGR + 15 * 2 , width() + 5 );
         if( !rect.contains( event->pos() ) )
         { /* We are outside */
             if ( !b_mouseOutside )
@@ -719,13 +730,13 @@ void SoundSlider::mouseMoveEvent( QMouseEvent *event )
         else
         { /* We are inside */
             b_mouseOutside = false;
-            changeValue( event->x() - paddingL );
+            changeValue( event->x() );
             emit sliderMoved( value() );
         }
     }
     else
     {
-        int i = ( ( event->x() - paddingL ) * maximum() + 40 ) / WLENGTH;
+        int i = ( ( event->x() - PADDINGL ) * maximum() ) / ( width() - ( PADDINGR + PADDINGL ) );
         i = __MIN( __MAX( 0, i ), maximum() );
         setToolTip( QString("%1  %" ).arg( i ) );
     }
@@ -733,7 +744,7 @@ void SoundSlider::mouseMoveEvent( QMouseEvent *event )
 
 void SoundSlider::changeValue( int x )
 {
-    setValue( (x * maximum() + 40 ) / WLENGTH );
+    setValue( ( ( x - PADDINGL ) * maximum() ) / ( width() - ( PADDINGR + PADDINGL ) ) );
 }
 
 void SoundSlider::setMuted( bool m )
@@ -752,13 +763,12 @@ void SoundSlider::paintEvent( QPaintEvent *e )
 
     painter.begin( this );
 
-    const int offset = int( ( WLENGTH * value() + 100 ) / maximum() ) + paddingL;
+    float f_scale = paintGradient->width() / float( width() );
+    const int offsetDst = int( ( ( width() - ( PADDINGR + PADDINGL ) ) * value() + 100 ) / maximum() ) + PADDINGL;
+    const int offsetSrc = int( ( ( paintGradient->width() - ( PADDINGR + PADDINGL ) * f_scale ) * value() + 100 ) / maximum() + PADDINGL * f_scale );
 
-    const QRectF boundsG( 0, 0, offset , paintGradient->height() );
-    painter.drawPixmap( boundsG, *paintGradient, boundsG );
-
-    const QRectF boundsO( 0, 0, pixOutside.width(), pixOutside.height() );
-    painter.drawPixmap( boundsO, pixOutside, boundsO );
+    painter.drawPixmap( 0, 0, offsetDst, height(), *paintGradient, 0, 0, offsetSrc, paintGradient->height() );
+    painter.drawPixmap( 0, 0, width(), height(), pixOutside, 0, 0,  pixOutside.width(), pixOutside.height() );
 
     painter.setPen( foreground );
     painter.setFont( textfont );

@@ -83,6 +83,7 @@ struct demux_sys_t
 {
     es_format_t  fmt;
     es_out_id_t *es;
+    unsigned i_max_frames;
 
     uint64_t i_data_offset;
     uint64_t i_data_size;
@@ -332,9 +333,9 @@ static int FrameSpanAddDescription( demux_t *p_demux, uint64_t i_desc_offset, fr
 static inline mtime_t FrameSpanGetTime( frame_span_t *span, uint32_t i_sample_rate )
 {
     if( !i_sample_rate )
-        return 0;
+        return VLC_TS_INVALID;
 
-    return ( span->i_samples * CLOCK_FREQ ) / i_sample_rate + 1;
+    return ( span->i_samples * CLOCK_FREQ ) / i_sample_rate + VLC_TS_0;
 }
 
 /* SetSpanWithSample returns the span from the beginning of the file up to and
@@ -511,6 +512,12 @@ static int ReadDescChunk( demux_t *p_demux )
     p_sys->fmt.audio.i_bitspersample = i_bits_per_channel; /* mBitsPerChannel */
     p_sys->fmt.audio.i_blockalign = i_bytes_per_packet;
     p_sys->fmt.i_bitrate = i_bits_per_channel * p_sys->fmt.audio.i_rate * i_channels_per_frame;
+
+    if( p_sys->fmt.i_codec == VLC_CODEC_OPUS )
+    {
+        p_sys->i_max_frames = 1;
+    }
+    else p_sys->i_max_frames = UINT_MAX;
 
     return VLC_SUCCESS;
 }
@@ -817,7 +824,7 @@ static int Open( vlc_object_t *p_this )
     /* From this point on, we have to free p_sys if we return an error (e.g. "goto caf_open_end") */
 
     p_sys = p_demux->p_sys;
-    es_format_Init( &p_sys->fmt, UNKNOWN_ES, 0 );
+    es_format_Init( &p_sys->fmt, AUDIO_ES, 0 );
 
     vlc_fourcc_t i_fcc;
     uint64_t i_size;
@@ -951,12 +958,21 @@ static int Demux( demux_t *p_demux )
     }
     else /* use packet table */
     {
+        uint64_t i_max_frames;
+        if( p_sys->packet_table.i_num_packets > p_sys->position.i_frames )
+            i_max_frames = p_sys->packet_table.i_num_packets - p_sys->position.i_frames;
+        else
+            i_max_frames = 1; /* will be rejected on FrameSpanAddDescription below */
+
+        if( i_max_frames > p_sys->i_max_frames )
+            i_max_frames = p_sys->i_max_frames;
+
         do
         {
             if( FrameSpanAddDescription( p_demux, p_sys->position.i_desc_bytes + advance.i_desc_bytes, &advance ))
                 break;
         }
-        while (( i_req_samples > advance.i_samples ) && ( p_sys->position.i_frames + advance.i_frames ) < p_sys->packet_table.i_num_packets );
+        while ( i_req_samples > advance.i_samples && advance.i_frames < i_max_frames );
     }
 
     if( !advance.i_frames )
@@ -982,12 +998,12 @@ static int Demux( demux_t *p_demux )
     }
 
     p_block->i_dts =
-    p_block->i_pts = VLC_TS_0 + FrameSpanGetTime( &p_sys->position, p_sys->fmt.audio.i_rate );
+    p_block->i_pts = FrameSpanGetTime( &p_sys->position, p_sys->fmt.audio.i_rate );
 
     FrameSpanAddSpan( &p_sys->position, &advance );
 
     /* set PCR */
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_block->i_pts );
+    es_out_SetPCR( p_demux->out, p_block->i_pts );
 
     es_out_Send( p_demux->out, p_sys->es, p_block );
 
@@ -1045,6 +1061,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_META:
             return vlc_stream_Control( p_demux->s, STREAM_GET_META, args );
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, p_sys->i_data_offset,
+                                          p_sys->i_data_size, 0, 1, i_query, args );
 
         default:
             return VLC_EGENERIC;

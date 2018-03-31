@@ -46,7 +46,7 @@ static void Close( vlc_object_t * );
 
 vlc_module_begin()
     set_shortname( N_("KWallet keystore") )
-    set_description( N_("secrets are stored via KWallet") )
+    set_description( N_("Secrets are stored via KWallet") )
     set_category( CAT_ADVANCED )
     set_subcategory( SUBCAT_ADVANCED_MISC )
     set_capability( "keystore", 100 )
@@ -1071,7 +1071,7 @@ kwallet_read_password_list( vlc_keystore* p_keystore, char* psz_entry_name,
     DBusMessageIter var_iter;
     vlc_keystore_entry* p_entries = NULL;
     size_t i_size;
-    uint8_t* p_secret_decoded;
+    uint8_t* p_secret_decoded = NULL;
     char* p_reply;
     char* p_secret;
     int i = 0;
@@ -1179,8 +1179,10 @@ kwallet_read_password_list( vlc_keystore* p_keystore, char* psz_entry_name,
     return p_entries;
 
 error:
+    free( p_secret_decoded );
     *pi_count = 0;
-    vlc_keystore_release_entries( p_entries, i );
+    if ( p_entries )
+        vlc_keystore_release_entries( p_entries, i );
     if ( msg )
         dbus_message_unref( msg );
     if ( repmsg )

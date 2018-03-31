@@ -40,6 +40,8 @@
 #include "../../packetizer/a52.h"
 #include "../../packetizer/dts_header.h"
 #include "../meta_engine/ID3Tag.h"
+#include "../meta_engine/ID3Text.h"
+#include "../meta_engine/ID3Meta.h"
 
 /*****************************************************************************
  * Module descriptor
@@ -96,8 +98,6 @@ typedef struct
 {
     char  psz_version[10];
     int   i_lowpass;
-    float pf_replay_gain[AUDIO_REPLAY_GAIN_MAX];
-    float pf_replay_peak[AUDIO_REPLAY_GAIN_MAX];
 } lame_extra_t;
 
 typedef struct
@@ -156,6 +156,9 @@ struct demux_sys_t
         lame_extra_t lame;
         bool b_lame;
     } xing;
+
+    float rgf_replay_gain[AUDIO_REPLAY_GAIN_MAX];
+    float rgf_replay_peak[AUDIO_REPLAY_GAIN_MAX];
 
     sync_table_t mllt;
 };
@@ -244,23 +247,18 @@ static int OpenCommon( demux_t *p_demux,
         return VLC_EGENERIC;
     }
 
-    if( p_sys->xing.b_lame )
+    es_format_t *p_fmt = &p_sys->p_packetizer->fmt_out;
+    for( int i = 0; i < AUDIO_REPLAY_GAIN_MAX; i++ )
     {
-        lame_extra_t *p_lame = &p_sys->xing.lame;
-        es_format_t *p_fmt = &p_sys->p_packetizer->fmt_out;
-
-        for( int i = 0; i < AUDIO_REPLAY_GAIN_MAX; i++ )
+        if ( p_sys->rgf_replay_gain[i] != 0.0 )
         {
-            if ( p_lame->pf_replay_gain[i] != 0 )
-            {
-                p_fmt->audio_replay_gain.pb_gain[i] = true;
-                p_fmt->audio_replay_gain.pf_gain[i] = p_lame->pf_replay_gain[i];
-            }
-            if ( p_lame->pf_replay_peak[i] != 0 )
-            {
-                p_fmt->audio_replay_gain.pb_peak[i] = true;
-                p_fmt->audio_replay_gain.pf_peak[i] = p_lame->pf_replay_peak[i];
-            }
+            p_fmt->audio_replay_gain.pb_gain[i] = true;
+            p_fmt->audio_replay_gain.pf_gain[i] = p_sys->rgf_replay_gain[i];
+        }
+        if ( p_sys->rgf_replay_peak[i] != 0.0 )
+        {
+            p_fmt->audio_replay_gain.pb_peak[i] = true;
+            p_fmt->audio_replay_gain.pf_peak[i] = p_sys->rgf_replay_peak[i];
         }
     }
 
@@ -349,7 +347,7 @@ static int Demux( demux_t *p_demux )
         if( p_block_out->i_dts > VLC_TS_INVALID )
         {
             p_block_out->i_dts += p_sys->i_time_offset;
-            es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_block_out->i_dts );
+            es_out_SetPCR( p_demux->out, p_block_out->i_dts );
         }
         /* Re-estimate bitrate */
         if( p_sys->b_estimate_bitrate && p_sys->i_pts > INT64_C(500000) )
@@ -914,37 +912,58 @@ static int ID3TAG_Parse_Handler( uint32_t i_tag, const uint8_t *p_payload, size_
         }
         return VLC_EGENERIC;
     }
+    else if( i_tag == VLC_FOURCC('T', 'X', 'X', 'X') )
+    {
+        vlc_meta_t *p_meta = vlc_meta_New();
+        if( p_meta )
+        {
+            bool b_updated;
+            if( ID3HandleTag( p_payload, i_payload, i_tag, p_meta, &b_updated ) )
+            {
+                char ** ppsz_keys = vlc_meta_CopyExtraNames( p_meta );
+                if( ppsz_keys )
+                {
+                    for( size_t i = 0; ppsz_keys[i]; ++i )
+                    {
+                        float *pf = NULL;
+                        if(     !strcasecmp( ppsz_keys[i], "REPLAYGAIN_TRACK_GAIN" ) )
+                            pf = &p_sys->rgf_replay_gain[AUDIO_REPLAY_GAIN_TRACK];
+                        else if( !strcasecmp( ppsz_keys[i], "REPLAYGAIN_TRACK_PEAK" ) )
+                            pf = &p_sys->rgf_replay_peak[AUDIO_REPLAY_GAIN_TRACK];
+                        else if( !strcasecmp( ppsz_keys[i], "REPLAYGAIN_ALBUM_GAIN" ) )
+                            pf = &p_sys->rgf_replay_gain[AUDIO_REPLAY_GAIN_ALBUM];
+                        else if( !strcasecmp( ppsz_keys[i], "REPLAYGAIN_ALBUM_PEAK" ) )
+                            pf = &p_sys->rgf_replay_peak[AUDIO_REPLAY_GAIN_ALBUM];
+                        if( pf )
+                        {
+                            const char *psz_val = vlc_meta_GetExtra( p_meta, ppsz_keys[i] );
+                            if( psz_val )
+                                *pf = us_atof( psz_val );
+                        }
+                        free( ppsz_keys[i] );
+                    }
+                    free( ppsz_keys );
+                }
+            }
+            vlc_meta_Delete( p_meta );
+        }
+    }
 
     return VLC_SUCCESS;
 }
 
-static int ID3Parse( demux_t *p_demux, uint64_t i_stream_offset,
+static int ID3Parse( demux_t *p_demux,
                      int (*pf_callback)(uint32_t, const uint8_t *, size_t, void *) )
 {
-    const uint8_t *p_peek;
+    const block_t *p_tags = NULL;
 
-    bool b_canseek;
-    if( i_stream_offset < 10 ||
-        vlc_stream_Control( p_demux->s, STREAM_CAN_SEEK, &b_canseek ) != VLC_SUCCESS ||
-        !b_canseek ||
-        vlc_stream_Seek( p_demux->s, 0 ) != VLC_SUCCESS )
+    if( vlc_stream_Control( p_demux->s, STREAM_GET_TAGS, &p_tags ) != VLC_SUCCESS )
         return VLC_EGENERIC;
 
-    int64_t i_peek = vlc_stream_Peek( p_demux->s, &p_peek, i_stream_offset );
-    if( i_peek > 0 && (uint64_t) i_peek == i_stream_offset )
-    {
-        while( i_peek > 0 )
-        {
-            size_t i_forward =  ID3TAG_Parse( p_peek, i_peek,
-                                              pf_callback, (void *) p_demux );
-            if(i_forward == 0)
-                break;
-            p_peek += i_forward;
-            i_peek -= i_forward;
-        }
-    }
+    for( ; p_tags; p_tags = p_tags->p_next )
+        ID3TAG_Parse( p_tags->p_buffer, p_tags->i_buffer, pf_callback, (void *) p_demux );
 
-    return vlc_stream_Seek( p_demux->s, i_stream_offset );
+    return VLC_SUCCESS;
 }
 
 static int MpgaInit( demux_t *p_demux )
@@ -957,7 +976,7 @@ static int MpgaInit( demux_t *p_demux )
     /* */
     p_sys->i_packet_size = 1024;
 
-    ID3Parse( p_demux, p_sys->i_stream_offset, ID3TAG_Parse_Handler );
+    ID3Parse( p_demux, ID3TAG_Parse_Handler );
 
     /* Load a potential xing header */
     i_peek = vlc_stream_Peek( p_demux->s, &p_peek, 4 + 1024 );
@@ -1027,9 +1046,9 @@ static int MpgaInit( demux_t *p_demux )
         uint16_t track = MpgaXingGetWBE( &p_xing, &i_xing, 0 );
         uint16_t album = MpgaXingGetWBE( &p_xing, &i_xing, 0 );
 
-        p_lame->pf_replay_peak[AUDIO_REPLAY_GAIN_TRACK] = (float) MpgaXingLameConvertPeak( peak );
-        p_lame->pf_replay_gain[AUDIO_REPLAY_GAIN_TRACK] = (float) MpgaXingLameConvertGain( track );
-        p_lame->pf_replay_gain[AUDIO_REPLAY_GAIN_ALBUM] = (float) MpgaXingLameConvertGain( album );
+        p_sys->rgf_replay_peak[AUDIO_REPLAY_GAIN_TRACK] = (float) MpgaXingLameConvertPeak( peak );
+        p_sys->rgf_replay_gain[AUDIO_REPLAY_GAIN_TRACK] = (float) MpgaXingLameConvertGain( track );
+        p_sys->rgf_replay_gain[AUDIO_REPLAY_GAIN_ALBUM] = (float) MpgaXingLameConvertGain( album );
 
         MpgaXingSkip( &p_xing, &i_xing, 1 ); /* flags */
     }

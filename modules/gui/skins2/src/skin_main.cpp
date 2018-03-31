@@ -250,7 +250,7 @@ static void *Run( void * p_obj )
     }
 
     // Load a theme
-    skin_last = config_GetPsz( p_intf, "skins2-last" );
+    skin_last = config_GetPsz( "skins2-last" );
     pLoader = new ThemeLoader( p_intf );
 
     if( !skin_last || !pLoader->load( skin_last ) )
@@ -468,6 +468,16 @@ static int WindowControl( vout_window_t *pWnd, int query, va_list args )
             // Post a SetOnTop command
             CmdSetOnTop* pCmd =
                 new CmdSetOnTop( pIntf, on_top );
+            pQueue->push( CmdGenericPtr( pCmd ) );
+            return VLC_SUCCESS;
+        }
+
+        case VOUT_WINDOW_HIDE_MOUSE:
+        {
+            bool hide = va_arg( args, int );
+            // Post a HideMouse command
+            CmdHideMouse* pCmd =
+                new CmdHideMouse( pIntf, pWnd, hide );
             pQueue->push( CmdGenericPtr( pCmd ) );
             return VLC_SUCCESS;
         }

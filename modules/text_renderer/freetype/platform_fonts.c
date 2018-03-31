@@ -249,7 +249,7 @@ vlc_family_t *NewFamily( filter_t *p_filter, const char *psz_family,
     if( psz_family && *psz_family )
         psz_name = ToLower( psz_family );
     else
-        if( asprintf( &psz_name, FB_NAME"-%02d",
+        if( asprintf( &psz_name, FB_NAME"-%04d",
                       p_sys->i_fallback_counter++ ) < 0 )
             psz_name = NULL;
 
@@ -464,7 +464,7 @@ int ConvertToLiveSize( filter_t *p_filter, const text_style_t *p_style )
     }
     else if ( p_style->f_font_relsize )
     {
-        i_font_size = (int) p_filter->fmt_out.video.i_height * p_style->f_font_relsize;
+        i_font_size = (int) p_filter->fmt_out.video.i_height * p_style->f_font_relsize / 100;
     }
 
     if( p_sys->i_scale != 100 )

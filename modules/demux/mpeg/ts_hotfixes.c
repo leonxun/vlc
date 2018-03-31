@@ -219,6 +219,7 @@ static void BuildPATCallback( void *p_opaque, block_t *p_block )
 {
     ts_pid_t *pat_pid = (ts_pid_t *) p_opaque;
     dvbpsi_packet_push( pat_pid->u.p_pat->handle, p_block->p_buffer );
+    block_Release( p_block );
 }
 
 static void BuildPMTCallback( void *p_opaque, block_t *p_block )
@@ -229,7 +230,9 @@ static void BuildPMTCallback( void *p_opaque, block_t *p_block )
     {
         dvbpsi_packet_push( program_pid->u.p_pmt->handle,
                             p_block->p_buffer );
-        p_block = p_block->p_next;
+        block_t *p_next = p_block->p_next;
+        block_Release( p_block );
+        p_block = p_next;
     }
 }
 
@@ -270,14 +273,14 @@ void MissingPATPMTFixup( demux_t *p_demux )
     if( i_num_pes == 0 )
         return;
 
-    ts_stream_t patstream =
+    tsmux_stream_t patstream =
     {
         .i_pid = 0,
         .i_continuity_counter = 0x10,
         .b_discontinuity = false
     };
 
-    ts_stream_t pmtprogramstream =
+    tsmux_stream_t pmtprogramstream =
     {
         .i_pid = i_program_pid,
         .i_continuity_counter = 0x0,
@@ -301,10 +304,11 @@ void MissingPATPMTFixup( demux_t *p_demux )
                                                                          : TS_MUX_STANDARD_DVB;
     struct esstreams_t
     {
-        pes_stream_t pes;
-        ts_stream_t ts;
+        pesmux_stream_t pes;
+        tsmux_stream_t ts;
+        es_format_t fmt;
     };
-    es_format_t esfmt = {0};
+
     struct esstreams_t *esstreams = calloc( i_num_pes, sizeof(struct esstreams_t) );
     pes_mapped_stream_t *mapped = calloc( i_num_pes, sizeof(pes_mapped_stream_t) );
     if( esstreams && mapped )
@@ -312,16 +316,20 @@ void MissingPATPMTFixup( demux_t *p_demux )
         int j=0;
         for( int i=0; i<p_sys->pids.i_all; i++ )
         {
-            const ts_pid_t *p_pid = p_sys->pids.pp_all[i];
+            p_pid = p_sys->pids.pp_all[i];
 
             if( !SEEN(p_pid) ||
                 p_pid->probed.i_fourcc == 0 )
                 continue;
 
-            esfmt.i_codec = p_pid->probed.i_fourcc;
+            es_format_Init(&esstreams[j].fmt, p_pid->probed.i_cat, p_pid->probed.i_fourcc);
+
             if( VLC_SUCCESS !=
-                FillPMTESParams(mux_standard, &esfmt, &esstreams[j].ts, &esstreams[j].pes ) )
+                FillPMTESParams(mux_standard, &esstreams[j].fmt, &esstreams[j].ts, &esstreams[j].pes ) )
+            {
+                es_format_Clean( &esstreams[j].fmt );
                 continue;
+            }
 
             /* Important for correct remapping: Enforce probed PES stream id */
             esstreams[j].pes.i_stream_id = p_pid->probed.i_stream_id;
@@ -329,7 +337,7 @@ void MissingPATPMTFixup( demux_t *p_demux )
             esstreams[j].ts.i_pid = p_pid->i_pid;
             mapped[j].pes = &esstreams[j].pes;
             mapped[j].ts = &esstreams[j].ts;
-            mapped[j].fmt = &esfmt;
+            mapped[j].fmt = &esstreams[j].fmt;
             j++;
         }
 
@@ -341,6 +349,10 @@ void MissingPATPMTFixup( demux_t *p_demux )
                 NULL,
                 1, &pmtprogramstream, &i_program_number,
                 j, mapped );
+
+        /* Cleanup */
+        for( int i=0; i<j; i++ )
+            es_format_Clean( &esstreams[i].fmt );
     }
     free(esstreams);
     free(mapped);

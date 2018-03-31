@@ -25,13 +25,16 @@
 
 #import "VLCMain+OldPrefs.h"
 #import "VLCCoreInteraction.h"
+#import "VLCSimplePrefsController.h"
 
 #include <unistd.h> /* execl() */
+
+#import <vlc_interface.h>
 
 @implementation VLCMain(OldPrefs)
 
 static NSString * kVLCPreferencesVersion = @"VLCPreferencesVersion";
-static const int kCurrentPreferencesVersion = 3;
+static const int kCurrentPreferencesVersion = 4;
 
 + (void)initialize
 {
@@ -53,7 +56,7 @@ static const int kCurrentPreferencesVersion = 3;
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
-- (void)removeOldPreferences
+- (void)migrateOldPreferences
 {
     NSUserDefaults * defaults = [NSUserDefaults standardUserDefaults];
     int version = [defaults integerForKey:kVLCPreferencesVersion];
@@ -71,7 +74,7 @@ static const int kCurrentPreferencesVersion = 3;
         [defaults setInteger:kCurrentPreferencesVersion forKey:kVLCPreferencesVersion];
         [defaults synchronize];
 
-        if (![[VLCCoreInteraction sharedInstance] fixPreferences])
+        if (![[VLCCoreInteraction sharedInstance] fixIntfSettings])
             return;
         else
             config_SaveConfigFile(getIntf()); // we need to do manually, since we won't quit libvlc cleanly
@@ -79,6 +82,27 @@ static const int kCurrentPreferencesVersion = 3;
         /* version 2 (used by VLC 2.0.x and early versions of 2.1) can lead to exceptions within 2.1 or later
          * so we reset the OS X specific prefs here - in practice, no user will notice */
         [self resetAndReinitializeUserDefaults];
+
+    } else if (version == 3) {
+        /* version 4 (introduced in 3.0.0) adds RTL settings depending on stored language */
+        [defaults setInteger:kCurrentPreferencesVersion forKey:kVLCPreferencesVersion];
+        BOOL hasUpdated = [VLCSimplePrefsController updateRightToLeftSettings];
+        [defaults synchronize];
+
+        // In VLC 2.2.x, config for filters was fully controlled by audio and video effects panel.
+        // In VLC 3.0, this is no longer the case and VLCs config is not touched anymore. Therefore,
+        // disable filter in VLCs config in this transition.
+        playlist_t *p_playlist = pl_Get(getIntf());
+        var_SetString(p_playlist, "audio-filter", "");
+        var_SetString(p_playlist, "video-filter", "");
+
+        config_PutPsz("audio-filter", "");
+        config_PutPsz("video-filter", "");
+        config_SaveConfigFile(getIntf());
+
+        // This migration only has effect rarely, therefore only restart then
+        if (!hasUpdated)
+            return;
 
     } else {
         NSArray *libraries = NSSearchPathForDirectoriesInDomains(NSLibraryDirectory,
@@ -89,7 +113,7 @@ static const int kCurrentPreferencesVersion = 3;
         int res = NSRunInformationalAlertPanel(_NS("Remove old preferences?"),
                                                _NS("We just found an older version of VLC's preferences files."),
                                                _NS("Move To Trash and Relaunch VLC"), _NS("Ignore"), nil, nil);
-        if (res != NSOKButton) {
+        if (res != NSModalResponseOK) {
             [defaults setInteger:kCurrentPreferencesVersion forKey:kVLCPreferencesVersion];
             return;
         }

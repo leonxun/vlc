@@ -190,7 +190,7 @@ static void UpdateTigerFontDesc( decoder_t *p_dec );
 
 #define FORMAT_TEXT N_("Formatted Subtitles")
 #define FORMAT_LONGTEXT N_("Kate streams allow for text formatting. " \
- "VLC partly implements this, but you can choose to disable all formatting." \
+ "VLC partly implements this, but you can choose to disable all formatting. " \
  "Note that this has no effect is rendering via Tiger is enabled.")
 
 #ifdef HAVE_TIGER
@@ -268,7 +268,7 @@ vlc_module_begin ()
     set_shortname( N_("Kate"))
     set_description( N_("Kate overlay decoder") )
     set_help( HELP_TEXT )
-    set_capability( "decoder", 50 )
+    set_capability( "spu decoder", 50 )
     set_callbacks( OpenDecoder, CloseDecoder )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_SCODEC )
@@ -417,7 +417,7 @@ static int OpenDecoder( vlc_object_t *p_this )
 
 #endif
 
-    es_format_Init( &p_dec->fmt_out, SPU_ES, 0 );
+    p_dec->fmt_out.i_codec = 0; // may vary during the stream
 
     /* add the decoder to the global list */
     decoder_t **list = realloc( kate_decoder_list, (kate_decoder_list_size+1) * sizeof( *list ));
@@ -647,8 +647,7 @@ static void *ProcessPacket( decoder_t *p_dec, kate_packet *p_kp,
     {
         subpicture_t *p_buf = DecodePacket( p_dec, p_kp, p_block );
 
-        if( p_block )
-            block_Release( p_block );
+        block_Release( p_block );
         return p_buf;
     }
 }

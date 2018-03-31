@@ -27,6 +27,7 @@
 
 #include <vlc_common.h>
 #include <vlc_memstream.h>
+#include <vlc_renderer_discovery.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -269,7 +270,7 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
                 int i;
 
                 *pi_bkmk = priv->i_bookmark;
-                *ppp_bkmk = malloc( sizeof(seekpoint_t *) * priv->i_bookmark );
+                *ppp_bkmk = vlc_alloc( priv->i_bookmark, sizeof(seekpoint_t *) );
                 for( i = 0; i < priv->i_bookmark; i++ )
                 {
                     (*ppp_bkmk)[i] =
@@ -344,7 +345,7 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
         {
             vlc_mutex_lock( &priv->p_item->lock );
             unsigned count = priv->i_title;
-            input_title_t **array = malloc( count * sizeof (*array) );
+            input_title_t **array = vlc_alloc( count, sizeof (*array) );
 
             if( count > 0 && unlikely(array == NULL) )
             {
@@ -391,7 +392,7 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
             }
 
             *array = calloc( p_title->i_seekpoint, sizeof(**array) );
-            if( unlikely(array == NULL) )
+            if( unlikely(*array == NULL) )
             {
                 vlc_mutex_unlock( &priv->p_item->lock );
                 return VLC_ENOMEM;
@@ -411,8 +412,13 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
             enum slave_type type =  (enum slave_type) va_arg( args, enum slave_type );
             psz = va_arg( args, char * );
             b_bool = va_arg( args, int );
+            bool b_notify = va_arg( args, int );
+            bool b_check_ext = va_arg( args, int );
 
             if( !psz || ( type != SLAVE_TYPE_SPU && type != SLAVE_TYPE_AUDIO ) )
+                return VLC_EGENERIC;
+            if( b_check_ext && type == SLAVE_TYPE_SPU &&
+                !subtitles_Filter( psz ) )
                 return VLC_EGENERIC;
 
             input_item_slave_t *p_slave =
@@ -423,21 +429,27 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
 
             val.p_address = p_slave;
             input_ControlPush( p_input, INPUT_CONTROL_ADD_SLAVE, &val );
+            if( b_notify )
+            {
+                vout_thread_t *p_vout = input_GetVout( p_input );
+                if( p_vout )
+                {
+                    switch( type )
+                    {
+                        case SLAVE_TYPE_AUDIO:
+                            vout_OSDMessage(p_vout, VOUT_SPU_CHANNEL_OSD, "%s",
+                                            vlc_gettext("Audio track added"));
+                            break;
+                        case SLAVE_TYPE_SPU:
+                            vout_OSDMessage(p_vout, VOUT_SPU_CHANNEL_OSD, "%s",
+                                            vlc_gettext("Subtitle track added"));
+                            break;
+                    }
+                    vlc_object_release( (vlc_object_t *)p_vout );
+                }
+            }
             return VLC_SUCCESS;
         }
-
-        case INPUT_ADD_SUBTITLE:
-            psz = va_arg( args, char * );
-            b_bool = va_arg( args, int );
-
-            if( !psz || *psz == '\0' )
-                return VLC_EGENERIC;
-            if( b_bool && !subtitles_Filter( psz ) )
-                return VLC_EGENERIC;
-
-            val.psz_string = strdup( psz );
-            input_ControlPush( p_input, INPUT_CONTROL_ADD_SUBTITLE, &val );
-            return VLC_SUCCESS;
 
         case INPUT_GET_ATTACHMENTS: /* arg1=input_attachment_t***, arg2=int*  res=can fail */
         {
@@ -453,7 +465,7 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
                 return VLC_EGENERIC;
             }
             *pi_attachment = priv->i_attachment;
-            *ppp_attachment = malloc( sizeof(input_attachment_t*) * priv->i_attachment );
+            *ppp_attachment = vlc_alloc( priv->i_attachment, sizeof(input_attachment_t*));
             for( int i = 0; i < priv->i_attachment; i++ )
                 (*ppp_attachment)[i] = vlc_input_attachment_Duplicate( priv->attachment[i] );
 
@@ -497,13 +509,17 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case INPUT_UPDATE_VIEWPOINT:
+        case INPUT_SET_INITIAL_VIEWPOINT:
         {
             vlc_viewpoint_t *p_viewpoint = malloc( sizeof(*p_viewpoint) );
             if( unlikely(p_viewpoint == NULL) )
                 return VLC_ENOMEM;
             val.p_address = p_viewpoint;
             *p_viewpoint = *va_arg( args, const vlc_viewpoint_t* );
-            if ( va_arg( args, int ) )
+            if ( i_query == INPUT_SET_INITIAL_VIEWPOINT )
+                input_ControlPush( p_input, INPUT_CONTROL_SET_INITIAL_VIEWPOINT,
+                                   &val );
+            else if ( va_arg( args, int ) )
                 input_ControlPush( p_input, INPUT_CONTROL_SET_VIEWPOINT, &val );
             else
                 input_ControlPush( p_input, INPUT_CONTROL_UPDATE_VIEWPOINT, &val );
@@ -527,7 +543,7 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
             size_t *pi_vout = va_arg( args, size_t * );
 
             input_resource_HoldVouts( priv->p_resource, ppp_vout, pi_vout );
-            if( *pi_vout <= 0 )
+            if( *pi_vout == 0 )
                 return VLC_EGENERIC;
             return VLC_SUCCESS;
         }
@@ -558,8 +574,16 @@ int input_vaControl( input_thread_t *p_input, int i_query, va_list args )
             return es_out_ControlModifyPcrSystem( priv->p_es_out_display, b_absolute, i_system );
         }
 
+        case INPUT_SET_RENDERER:
+        {
+            vlc_renderer_item_t* p_item = va_arg( args, vlc_renderer_item_t* );
+            val.p_address = p_item ? vlc_renderer_item_hold( p_item ) : NULL;
+            input_ControlPush( p_input, INPUT_CONTROL_SET_RENDERER, &val );
+            return VLC_SUCCESS;
+        }
+
         default:
-            msg_Err( p_input, "unknown query in input_vaControl" );
+            msg_Err( p_input, "unknown query 0x%x in %s", i_query, __func__ );
             return VLC_EGENERIC;
     }
 }

@@ -295,16 +295,16 @@ void vout_IntfInit( vout_thread_t *p_vout )
                 VLC_VAR_INTEGER | VLC_VAR_DOINHERIT | VLC_VAR_ISCOMMAND );
     var_AddCallback( p_vout, "sub-margin", SubMarginCallback, NULL );
 
-    var_Create( p_vout, "sub-text-scale",
-                VLC_VAR_INTEGER | VLC_VAR_DOINHERIT | VLC_VAR_ISCOMMAND );
-
     /* Mouse coordinates */
     var_Create( p_vout, "mouse-button-down", VLC_VAR_INTEGER );
     var_Create( p_vout, "mouse-moved", VLC_VAR_COORDS );
     var_Create( p_vout, "mouse-clicked", VLC_VAR_COORDS );
 
+    /* Device orientation */
+    var_Create( p_vout, "viewpoint-moved", VLC_VAR_ADDRESS );
+
     /* Viewpoint */
-    var_Create( p_vout, "viewpoint", VLC_VAR_ADDRESS  | VLC_VAR_DOINHERIT );
+    var_Create( p_vout, "viewpoint", VLC_VAR_ADDRESS  );
     var_AddCallback( p_vout, "viewpoint", ViewpointCallback, NULL );
     var_Create( p_vout, "viewpoint-changeable", VLC_VAR_BOOL );
 
@@ -324,7 +324,6 @@ void vout_IntfReinit( vout_thread_t *p_vout )
     var_TriggerCallback( p_vout, "sub-source" );
     var_TriggerCallback( p_vout, "sub-filter" );
     var_TriggerCallback( p_vout, "sub-margin" );
-    var_TriggerCallback( p_vout, "viewpoint" );
 }
 
 /*****************************************************************************
@@ -363,7 +362,7 @@ static int VoutSnapshotPip( vout_thread_t *p_vout, picture_t *p_pic )
 static void VoutOsdSnapshot( vout_thread_t *p_vout, picture_t *p_pic, const char *psz_filename )
 {
     msg_Dbg( p_vout, "snapshot taken (%s)", psz_filename );
-    vout_OSDMessage( p_vout, SPU_DEFAULT_CHANNEL, "%s", psz_filename );
+    vout_OSDMessage( p_vout, VOUT_SPU_CHANNEL_OSD, "%s", psz_filename );
 
     if( var_InheritBool( p_vout, "snapshot-preview" ) )
     {
@@ -384,11 +383,10 @@ static void VoutSaveSnapshot( vout_thread_t *p_vout )
     /* */
     picture_t *p_picture;
     block_t *p_image;
-    video_format_t fmt;
 
     /* 500ms timeout
      * XXX it will cause trouble with low fps video (< 2fps) */
-    if( vout_GetSnapshot( p_vout, &p_image, &p_picture, &fmt, psz_format, 500*1000 ) )
+    if( vout_GetSnapshot( p_vout, &p_image, &p_picture, NULL, psz_format, 500*1000 ) )
     {
         p_picture = NULL;
         p_image = NULL;

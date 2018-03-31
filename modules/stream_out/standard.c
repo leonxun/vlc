@@ -48,14 +48,14 @@
 #define DEST_TEXT N_("Output destination")
 #define DEST_LONGTEXT N_( \
     "Destination (URL) to use for the stream. Overrides path and bind parameters" )
-#define BIND_TEXT N_("address to bind to (helper setting for dst)")
+#define BIND_TEXT N_("Address to bind to (helper setting for dst)")
 #define BIND_LONGTEXT N_( \
-  "address:port to bind vlc to listening incoming streams "\
-  "helper setting for dst,dst=bind+'/'+path. dst-parameter overrides this" )
-#define PATH_TEXT N_("filename for stream (helper setting for dst)")
+  "address:port to bind vlc to listening incoming streams. "\
+  "Helper setting for dst, dst=bind+'/'+path. dst-parameter overrides this." )
+#define PATH_TEXT N_("Filename for stream (helper setting for dst)")
 #define PATH_LONGTEXT N_( \
-  "Filename for stream "\
-  "helper setting for dst, dst=bind+'/'+path, dst-parameter overrides this" )
+  "Filename for stream. "\
+  "Helper setting for dst, dst=bind+'/'+path. dst-parameter overrides this." )
 #define NAME_TEXT N_("Session name")
 #define NAME_LONGTEXT N_( \
     "This is the name of the session that will be announced in the SDP " \
@@ -82,11 +82,17 @@ static void     Close   ( vlc_object_t * );
 
 #define SOUT_CFG_PREFIX "sout-standard-"
 
+#ifdef ENABLE_SRT
+#define SRT_SHORTCUT "srt"
+#else
+#define SRT_SHORTCUT
+#endif
+
 vlc_module_begin ()
     set_shortname( N_("Standard"))
     set_description( N_("Standard stream output") )
     set_capability( "sout stream", 50 )
-    add_shortcut( "standard", "std", "file", "http", "udp" )
+    add_shortcut( "standard", "std", "file", "http", "udp", SRT_SHORTCUT )
     set_category( CAT_SOUT )
     set_subcategory( SUBCAT_SOUT_STREAM )
 

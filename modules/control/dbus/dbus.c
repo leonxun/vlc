@@ -75,6 +75,7 @@
 #define DBUS_INSTANCE_ID_PREFIX "instance"
 
 #define SEEK_THRESHOLD 1000 /* µsec */
+#define EVENTS_DELAY INT64_C(100000) /* 100 ms */
 
 /*****************************************************************************
  * Local prototypes.
@@ -193,13 +194,11 @@ static int Open( vlc_object_t *p_this )
             &dbus_mpris_vtable, p_this );
 
     /* Try to register org.mpris.MediaPlayer2.vlc */
-    dbus_bus_request_name( p_conn, DBUS_MPRIS_BUS_NAME, 0, &error );
-    if( dbus_error_is_set( &error ) )
+    const unsigned bus_flags = DBUS_NAME_FLAG_DO_NOT_QUEUE;
+    var_Create(p_intf->obj.libvlc, "dbus-mpris-name", VLC_VAR_STRING);
+    if( dbus_bus_request_name( p_conn, DBUS_MPRIS_BUS_NAME, bus_flags, NULL )
+                                     != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER )
     {
-        msg_Dbg( p_this, "Failed to get service name %s: %s",
-                 DBUS_MPRIS_BUS_NAME, error.message );
-        dbus_error_free( &error );
-
         /* Register an instance-specific well known name of the form
          * org.mpris.MediaPlayer2.vlc.instanceXXXX where XXXX is the
          * current Process ID */
@@ -210,19 +209,20 @@ static int Open( vlc_object_t *p_this )
                   DBUS_MPRIS_BUS_NAME"."DBUS_INSTANCE_ID_PREFIX"%"PRIu32,
                   (uint32_t)getpid() );
 
-        dbus_bus_request_name( p_conn, unique_service, 0, &error );
-        if( dbus_error_is_set( &error ) )
+        if( dbus_bus_request_name( p_conn, unique_service, bus_flags, NULL )
+                                     == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER )
         {
-            msg_Err( p_this, "Failed to get service name %s: %s",
-                     DBUS_MPRIS_BUS_NAME, error.message );
-            dbus_error_free( &error );
-        }
-        else
             msg_Dbg( p_intf, "listening on dbus as: %s", unique_service );
+            var_SetString(p_intf->obj.libvlc, "dbus-mpris-name",
+                          unique_service);
+        }
     }
     else
+    {
         msg_Dbg( p_intf, "listening on dbus as: %s", DBUS_MPRIS_BUS_NAME );
-
+        var_SetString(p_intf->obj.libvlc, "dbus-mpris-name",
+                      DBUS_MPRIS_BUS_NAME);
+    }
     dbus_connection_flush( p_conn );
 
     p_intf->p_sys = p_sys;
@@ -265,6 +265,7 @@ static int Open( vlc_object_t *p_this )
     return VLC_SUCCESS;
 
 error:
+    var_Destroy(p_intf->obj.libvlc, "dbus-mpris-name");
     /* The dbus connection is private,
      * so we are responsible for closing it
      * XXX: Does this make sense when OOM ? */
@@ -342,7 +343,7 @@ static dbus_bool_t add_timeout(DBusTimeout *to, void *data)
     dbus_timeout_set_data(to, expiry, free);
 
     vlc_mutex_lock(&sys->lock);
-    vlc_array_append(&sys->timeouts, to);
+    vlc_array_append_or_abort(&sys->timeouts, to);
     vlc_mutex_unlock(&sys->lock);
 
     return TRUE;
@@ -447,7 +448,7 @@ static dbus_bool_t add_watch( DBusWatch *p_watch, void *p_data )
     intf_sys_t    *p_sys  = (intf_sys_t*) p_intf->p_sys;
 
     vlc_mutex_lock( &p_sys->lock );
-    vlc_array_append( &p_sys->watches, p_watch );
+    vlc_array_append_or_abort( &p_sys->watches, p_watch );
     vlc_mutex_unlock( &p_sys->lock );
 
     return TRUE;
@@ -616,13 +617,13 @@ static void ProcessEvents( intf_thread_t *p_intf,
         free( p_events[i] );
     }
 
-    if( vlc_dictionary_keys_count( &player_properties ) )
+    if( !vlc_dictionary_is_empty( &player_properties ) )
         PlayerPropertiesChangedEmit( p_intf, &player_properties );
 
-    if( vlc_dictionary_keys_count( &tracklist_properties ) )
+    if( !vlc_dictionary_is_empty( &tracklist_properties ) )
         TrackListPropertiesChangedEmit( p_intf, &tracklist_properties );
 
-    if( vlc_dictionary_keys_count( &root_properties ) )
+    if( !vlc_dictionary_is_empty( &root_properties ) )
         RootPropertiesChangedEmit( p_intf, &root_properties );
 
     vlc_dictionary_clear( &player_properties,    NULL, NULL );
@@ -768,6 +769,8 @@ static void *Run( void *data )
 
     int canc = vlc_savecancel();
 
+    mtime_t events_last_date = VLC_TS_INVALID;
+    int events_poll_timeout = -1;
     for( ;; )
     {
         vlc_mutex_lock( &p_sys->lock );
@@ -783,6 +786,8 @@ static void *Run( void *data )
 
         /* thread cancellation is allowed while the main loop sleeps */
         vlc_restorecancel( canc );
+        if( timeout == -1 )
+            timeout = events_poll_timeout;
 
         while (poll(fds, i_fds, timeout) == -1)
         {
@@ -822,18 +827,43 @@ static void *Run( void *data )
 
         /* Get the list of events to process */
         size_t i_events = vlc_array_count( &p_sys->events );
-        callback_info_t* p_info[i_events ? i_events : 1];
-        for( size_t i = 0; i < i_events; i++ )
-        {
-            p_info[i] = vlc_array_item_at_index( &p_sys->events, i );
-        }
+        callback_info_t** pp_info = NULL;
 
-        vlc_array_clear( &p_sys->events );
+        if( i_events > 0 )
+        {
+            mtime_t now = mdate();
+            if( now - events_last_date > EVENTS_DELAY )
+            {
+                /* Send events every EVENTS_DELAY */
+                events_last_date = now;
+                events_poll_timeout = -1;
+
+                pp_info = vlc_alloc( i_events, sizeof(*pp_info) );
+                if( pp_info )
+                {
+                    for( size_t i = 0; i < i_events; i++ )
+                        pp_info[i] = vlc_array_item_at_index( &p_sys->events, i );
+                    vlc_array_clear( &p_sys->events );
+                }
+            }
+            else if( events_poll_timeout == -1 )
+            {
+                /* Request poll to wake up in order to send these events after
+                 * some delay */
+                events_poll_timeout = ( EVENTS_DELAY - ( now - events_last_date ) ) / 1000;
+            }
+        }
+        else /* No events: clear timeout */
+            events_poll_timeout = -1;
 
         /* now we can release the lock and process what's pending */
         vlc_mutex_unlock( &p_intf->p_sys->lock );
 
-        ProcessEvents( p_intf, p_info, i_events );
+        if( pp_info )
+        {
+            ProcessEvents( p_intf, pp_info, i_events );
+            free( pp_info );
+        }
         ProcessWatches( p_intf, p_watches, i_watches, fds, i_fds );
 
         DispatchDBusMessages( p_intf );
@@ -850,6 +880,29 @@ static void   wakeup_main_loop( void *p_data )
     if( !write( p_intf->p_sys->p_pipe_fds[PIPE_IN], "\0", 1 ) )
         msg_Err( p_intf, "Could not wake up the main loop: %s",
                  vlc_strerror_c(errno) );
+}
+
+static bool add_event_locked( intf_thread_t *p_intf, callback_info_t *p_info )
+{
+    if( !p_info->signal )
+    {
+        free( p_info );
+        return false;
+    }
+
+    for( size_t i = 0; i < vlc_array_count( &p_intf->p_sys->events ); ++ i )
+    {
+        callback_info_t *oldinfo =
+            vlc_array_item_at_index( &p_intf->p_sys->events, i );
+        if( p_info->signal == oldinfo->signal )
+        {
+            free( p_info );
+            return false;
+        }
+    }
+
+    vlc_array_append( &p_intf->p_sys->events, p_info );
+    return true;
 }
 
 /* Flls a callback_info_t data structure in response
@@ -941,13 +994,11 @@ static int InputCallback( vlc_object_t *p_this, const char *psz_var,
         p_sys->i_playing_state = i_state;
         p_info->signal = SIGNAL_STATE;
     }
-    if( p_info->signal )
-        vlc_array_append( &p_sys->events, p_info );
-    else
-        free( p_info );
+    bool added = add_event_locked( p_intf, p_info );
     vlc_mutex_unlock( &p_intf->p_sys->lock );
 
-    wakeup_main_loop( p_intf );
+    if( added )
+        wakeup_main_loop( p_intf );
 
     (void)psz_var;
     (void)oldval;
@@ -1003,10 +1054,12 @@ static int AllCallback( vlc_object_t *p_this, const char *psz_var,
     // Append the event
     *p_info = info;
     vlc_mutex_lock( &p_intf->p_sys->lock );
-    vlc_array_append( &p_intf->p_sys->events, p_info );
+    bool added = add_event_locked( p_intf, p_info );
     vlc_mutex_unlock( &p_intf->p_sys->lock );
 
-    wakeup_main_loop( p_intf );
+    if( added )
+        wakeup_main_loop( p_intf );
+
     (void) p_this;
     return VLC_SUCCESS;
 }

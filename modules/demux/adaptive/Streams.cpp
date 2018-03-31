@@ -184,10 +184,23 @@ int AbstractStream::esCount() const
 
 bool AbstractStream::seekAble() const
 {
-    return (demuxer &&
-            !fakeesout->restarting() &&
-            !discontinuity &&
-            !commandsqueue->isFlushing() );
+    bool restarting = fakeesout->restarting();
+    bool draining = commandsqueue->isDraining();
+    bool eof = commandsqueue->isEOF();
+
+    msg_Dbg(p_realdemux, "demuxer %p, fakeesout restarting %d, "
+            "discontinuity %d, commandsqueue draining %d, commandsqueue eof %d",
+            static_cast<void *>(demuxer), restarting, discontinuity, draining, eof);
+
+    if(!demuxer || restarting || discontinuity || (!eof && draining))
+    {
+        msg_Warn(p_realdemux, "not seekable");
+        return false;
+    }
+    else
+    {
+        return true;
+    }
 }
 
 bool AbstractStream::isSelected() const
@@ -266,9 +279,9 @@ bool AbstractStream::canActivate() const
     return !dead;
 }
 
-bool AbstractStream::drain()
+bool AbstractStream::decodersDrained()
 {
-    return fakeesout->drain();
+    return fakeesout->decodersDrained();
 }
 
 AbstractStream::buffering_status AbstractStream::getLastBufferStatus() const
@@ -306,12 +319,13 @@ AbstractStream::buffering_status AbstractStream::doBufferize(mtime_t nz_deadline
         setDisabled(true);
         segmentTracker->reset();
         commandsqueue->Abort(false);
-        msg_Dbg(p_realdemux, "deactivating stream %s", format.str().c_str());
+        msg_Dbg(p_realdemux, "deactivating %s stream %s",
+                format.str().c_str(), description.c_str());
         vlc_mutex_unlock(&lock);
         return AbstractStream::buffering_end;
     }
 
-    if(commandsqueue->isFlushing())
+    if(commandsqueue->isDraining())
     {
         vlc_mutex_unlock(&lock);
         return AbstractStream::buffering_suspended;
@@ -325,15 +339,15 @@ AbstractStream::buffering_status AbstractStream::doBufferize(mtime_t nz_deadline
             /* If demux fails because of probing failure / wrong format*/
             if(discontinuity)
             {
-                msg_Dbg( p_realdemux, "Flushing on format change" );
+                msg_Dbg( p_realdemux, "Draining on format change" );
                 prepareRestart();
                 discontinuity = false;
-                commandsqueue->setFlush();
+                commandsqueue->setDraining();
                 vlc_mutex_unlock(&lock);
                 return AbstractStream::buffering_ongoing;
             }
             dead = true; /* Prevent further retries */
-            commandsqueue->setEOF();
+            commandsqueue->setEOF(true);
             vlc_mutex_unlock(&lock);
             return AbstractStream::buffering_end;
         }
@@ -352,7 +366,7 @@ AbstractStream::buffering_status AbstractStream::doBufferize(mtime_t nz_deadline
         }
 
         mtime_t nz_extdeadline = commandsqueue->getBufferingLevel() +
-                                (i_total_buffering - commandsqueue->getDemuxedAmount()) / (CLOCK_FREQ/4);
+                                (i_total_buffering - commandsqueue->getDemuxedAmount()) / 4;
         nz_deadline = std::max(nz_deadline, nz_extdeadline);
 
         /* need to read, demuxer still buffering, ... */
@@ -367,15 +381,15 @@ AbstractStream::buffering_status AbstractStream::doBufferize(mtime_t nz_deadline
                 prepareRestart(discontinuity);
                 if(discontinuity)
                 {
-                    msg_Dbg(p_realdemux, "Flushing on discontinuity");
-                    commandsqueue->setFlush();
+                    msg_Dbg(p_realdemux, "Draining on discontinuity");
+                    commandsqueue->setDraining();
                     discontinuity = false;
                 }
                 needrestart = false;
                 vlc_mutex_unlock(&lock);
                 return AbstractStream::buffering_ongoing;
             }
-            commandsqueue->setEOF();
+            commandsqueue->setEOF(true);
             vlc_mutex_unlock(&lock);
             return AbstractStream::buffering_end;
         }
@@ -399,8 +413,12 @@ AbstractStream::status AbstractStream::dequeue(mtime_t nz_deadline, mtime_t *pi_
 
     *pi_pcr = nz_deadline;
 
-    if(commandsqueue->isFlushing())
+    if(commandsqueue->isDraining())
     {
+        AdvDebug(msg_Dbg(p_realdemux, "Stream %s pcr %" PRId64 " dts %" PRId64 " deadline %" PRId64 " [DRAINING]",
+                         description.c_str(), commandsqueue->getPCR(), commandsqueue->getFirstDTS(),
+                         nz_deadline));
+
         *pi_pcr = commandsqueue->Process(p_realdemux->out, VLC_TS_0 + nz_deadline);
         if(!commandsqueue->isEmpty())
             return AbstractStream::status_demuxed;
@@ -418,7 +436,7 @@ AbstractStream::status AbstractStream::dequeue(mtime_t nz_deadline, mtime_t *pi_
         return AbstractStream::status_eof;
     }
 
-    AdvDebug(msg_Dbg(p_realdemux, "Stream %s pcr %ld dts %ld deadline %ld buflevel %ld",
+    AdvDebug(msg_Dbg(p_realdemux, "Stream %s pcr %" PRId64 " dts %" PRId64 " deadline %" PRId64 " buflevel %" PRId64,
                      description.c_str(), commandsqueue->getPCR(), commandsqueue->getFirstDTS(),
                      nz_deadline, commandsqueue->getBufferingLevel()));
 
@@ -429,6 +447,16 @@ AbstractStream::status AbstractStream::dequeue(mtime_t nz_deadline, mtime_t *pi_
     }
 
     return AbstractStream::status_buffering;
+}
+
+std::string AbstractStream::getContentType()
+{
+    if (currentChunk == NULL && !eof)
+        currentChunk = segmentTracker->getNextChunk(!fakeesout->restarting(), connManager);
+    if(currentChunk)
+        return currentChunk->getContentType();
+    else
+        return std::string();
 }
 
 block_t * AbstractStream::readNextBlock()
@@ -478,6 +506,8 @@ bool AbstractStream::setPosition(mtime_t time, bool tryonly)
     bool ret = segmentTracker->setPositionByTime(time, demuxer->needsRestartOnSeek(), tryonly);
     if(!tryonly && ret)
     {
+        // clear eof flag before restartDemux() to prevent readNextBlock() fail
+        eof = false;
         if(demuxer->needsRestartOnSeek())
         {
             if(currentChunk)
@@ -489,7 +519,16 @@ bool AbstractStream::setPosition(mtime_t time, bool tryonly)
             setTimeOffset(segmentTracker->getPlaybackTime());
 
             if( !restartDemux() )
+            {
+                msg_Info(p_realdemux, "Restart demux failed");
+                eof = true;
                 dead = true;
+                ret = false;
+            }
+            else
+            {
+                commandsqueue->setEOF(false);
+            }
         }
         else commandsqueue->Abort( true );
 
@@ -532,6 +571,41 @@ void AbstractStream::setTimeOffset(mtime_t i_offset)
     }
 }
 
+AbstractDemuxer * AbstractStream::createDemux(const StreamFormat &format)
+{
+    AbstractDemuxer *ret = newDemux( p_realdemux, format,
+                                     fakeesout->getEsOut(), demuxersource );
+    if(ret && !ret->create())
+    {
+        delete ret;
+        ret = NULL;
+    }
+    else commandsqueue->Commit();
+
+    return ret;
+}
+
+AbstractDemuxer *AbstractStream::newDemux(demux_t *p_realdemux, const StreamFormat &format,
+                                          es_out_t *out, AbstractSourceStream *source) const
+{
+    AbstractDemuxer *ret = NULL;
+    switch((unsigned)format)
+    {
+        case StreamFormat::MP4:
+            ret = new Demuxer(p_realdemux, "mp4", out, source);
+            break;
+
+        case StreamFormat::MPEG2TS:
+            ret = new Demuxer(p_realdemux, "ts", out, source);
+            break;
+
+        default:
+        case StreamFormat::UNSUPPORTED:
+            break;
+    }
+    return ret;
+}
+
 void AbstractStream::trackerEvent(const SegmentTrackerEvent &event)
 {
     switch(event.type)
@@ -559,6 +633,15 @@ void AbstractStream::trackerEvent(const SegmentTrackerEvent &event)
             {
                 needrestart = true;
             }
+            break;
+
+        case SegmentTrackerEvent::SEGMENT_CHANGE:
+            if(demuxer && demuxer->needsRestartOnEachSegment() && !inrestart)
+            {
+                needrestart = true;
+            }
+            break;
+
         default:
             break;
     }

@@ -35,6 +35,7 @@
 #include <list>
 #include <string>
 #include <assert.h>
+#include <stdexcept>
 
 #define VLC_MODULE_LICENSE VLC_LICENSE_GPL_2_PLUS
 #include <vlc_common.h>
@@ -51,14 +52,16 @@
 #include "access.h"
 #include "filter.h"
 
+#include "../src/win32/mta_holder.h"
+
 #define INSTANCEDATA_OF_PROPERTY_PTR(x) ((PKSPROPERTY((x))) + 1)
 #define INSTANCEDATA_OF_PROPERTY_SIZE(x) (sizeof((x)) - sizeof(KSPROPERTY))
 
 /*****************************************************************************
  * Access: local prototypes
  *****************************************************************************/
-static block_t *ReadCompressed( access_t *, bool * );
-static int AccessControl ( access_t *, int, va_list );
+static block_t *ReadCompressed( stream_t *, bool * );
+static int AccessControl ( stream_t *, int, va_list );
 
 static int Demux       ( demux_t * );
 static int DemuxControl( demux_t *, int, va_list );
@@ -71,7 +74,7 @@ static size_t EnumDeviceCaps( vlc_object_t *, IBaseFilter *,
                               AM_MEDIA_TYPE *mt, size_t, bool );
 static bool ConnectFilters( vlc_object_t *, access_sys_t *,
                             IBaseFilter *, CaptureFilter * );
-static int FindDevices( vlc_object_t *, const char *, char ***, char *** );
+static int FindDevices( const char *, char ***, char *** );
 
 static void ShowPropertyPage( IUnknown * );
 static void ShowDeviceProperties( vlc_object_t *, ICaptureGraphBuilder2 *,
@@ -133,7 +136,7 @@ static const char *const ppsz_standards_list_text[] =
 #define ADEV_LONGTEXT N_( \
     "Name of the audio device that will be used by the " \
     "DirectShow plugin. If you don't specify anything, the default device " \
-    "will be used. ")
+    "will be used.")
 #define SIZE_TEXT N_("Video size")
 #define SIZE_LONGTEXT N_( \
     "Size of the video that will be displayed by the " \
@@ -288,7 +291,7 @@ vlc_module_begin ()
                  AUDIO_BITSPERSAMPLE_LONGTEXT, true )
 
     add_shortcut( "dshow" )
-    set_capability( "access_demux", 0 )
+    set_capability( "access_demux", 1 )
     set_callbacks( DemuxOpen, DemuxClose )
 
     add_submodule ()
@@ -299,6 +302,18 @@ vlc_module_begin ()
 
 vlc_module_end ()
 
+struct ComContext
+{
+    ComContext( int mode )
+    {
+        if( FAILED( CoInitializeEx( NULL, mode ) ) )
+            throw std::runtime_error( "CoInitializeEx failed" );
+    }
+    ~ComContext()
+    {
+        CoUninitialize();
+    }
+};
 
 /*****************************************************************************
  * DirectShow elementary stream descriptor
@@ -392,10 +407,6 @@ static int CommonOpen( vlc_object_t *p_this, access_sys_t *p_sys,
     bool b_use_audio = true;
     bool b_use_video = true;
 
-    /* Initialize OLE/COM */
-    if( FAILED(CoInitializeEx( NULL, COINIT_APARTMENTTHREADED )) )
-        vlc_assert_unreachable();
-
     var_Create( p_this,  CFG_PREFIX "config", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
     var_Create( p_this,  CFG_PREFIX "tuner", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
     psz_val = var_CreateGetString( p_this, CFG_PREFIX "vdev" );
@@ -465,8 +476,7 @@ static int CommonOpen( vlc_object_t *p_this, access_sys_t *p_sys,
 
     /* Chroma */
     psz_val = var_CreateGetString( p_this, CFG_PREFIX "chroma" );
-    i_chroma = vlc_fourcc_GetCodecFromString( UNKNOWN_ES, psz_val );
-    p_sys->b_chroma = i_chroma != 0;
+    i_chroma = vlc_fourcc_GetCodecFromString( VIDEO_ES, psz_val );
     free( psz_val );
 
     var_Create( p_this, CFG_PREFIX "fps", VLC_VAR_FLOAT | VLC_VAR_DOINHERIT );
@@ -660,10 +670,21 @@ static int DemuxOpen( vlc_object_t *p_this )
     demux_t      *p_demux = (demux_t *)p_this;
     access_sys_t *p_sys;
 
+    if (p_demux->out == NULL)
+        return VLC_EGENERIC;
+
     p_sys = (access_sys_t*)calloc( 1, sizeof( access_sys_t ) );
     if( !p_sys )
         return VLC_ENOMEM;
     p_demux->p_sys = (demux_sys_t *)p_sys;
+
+    ComContext ctx( COINIT_MULTITHREADED );
+
+    if( vlc_mta_acquire( p_this ) == false )
+    {
+        msg_Err( p_this, "Failed to acquire MTA" );
+        return VLC_EGENERIC;
+    }
 
     if( CommonOpen( p_this, p_sys, true ) != VLC_SUCCESS )
     {
@@ -682,8 +703,6 @@ static int DemuxOpen( vlc_object_t *p_this )
 
     p_demux->pf_demux   = Demux;
     p_demux->pf_control = DemuxControl;
-    p_demux->info.i_title = 0;
-    p_demux->info.i_seekpoint = 0;
 
     std::vector<dshow_stream_t*>::iterator it = p_sys->pp_streams.begin();
     std::vector<dshow_stream_t*>::iterator end = p_sys->pp_streams.end();
@@ -763,12 +782,20 @@ static int DemuxOpen( vlc_object_t *p_this )
  *****************************************************************************/
 static int AccessOpen( vlc_object_t *p_this )
 {
-    access_t     *p_access = (access_t*)p_this;
+    stream_t     *p_access = (stream_t*)p_this;
     access_sys_t *p_sys;
 
     p_access->p_sys = p_sys = (access_sys_t*)calloc( 1, sizeof( access_sys_t ) );
     if( !p_sys )
         return VLC_ENOMEM;
+
+    ComContext ctx( COINIT_MULTITHREADED );
+
+    if( vlc_mta_acquire( p_this ) == false )
+    {
+        msg_Err( p_this, "Failed to acquire MTA" );
+        return VLC_EGENERIC;
+    }
 
     if( CommonOpen( p_this, p_sys, false ) != VLC_SUCCESS )
     {
@@ -804,13 +831,12 @@ static void CommonClose( vlc_object_t *p_this, access_sys_t *p_sys )
 
     DeleteDirectShowGraph( p_this, p_sys );
 
-    /* Uninitialize OLE/COM */
-    CoUninitialize();
-
     vlc_delete_all( p_sys->pp_streams );
 
     vlc_mutex_destroy( &p_sys->lock );
     vlc_cond_destroy( &p_sys->wait );
+
+    vlc_mta_release( p_this );
 
     free( p_sys );
 }
@@ -820,8 +846,10 @@ static void CommonClose( vlc_object_t *p_this, access_sys_t *p_sys )
  *****************************************************************************/
 static void AccessClose( vlc_object_t *p_this )
 {
-    access_t     *p_access = (access_t *)p_this;
+    stream_t     *p_access = (stream_t *)p_this;
     access_sys_t *p_sys    = (access_sys_t *)p_access->p_sys;
+
+    ComContext ctx( COINIT_MULTITHREADED );
 
     /* Stop capturing stuff */
     p_sys->p_control->Stop();
@@ -836,6 +864,8 @@ static void DemuxClose( vlc_object_t *p_this )
 {
     demux_t      *p_demux = (demux_t *)p_this;
     access_sys_t *p_sys   = (access_sys_t *)p_demux->p_sys;
+
+    ComContext ctx( COINIT_MULTITHREADED );
 
     /* Stop capturing stuff */
     p_sys->p_control->Stop();
@@ -1736,8 +1766,10 @@ static size_t EnumDeviceCaps( vlc_object_t *p_this, IBaseFilter *p_filter,
 /*****************************************************************************
  * ReadCompressed: reads compressed (MPEG/DV) data from the device.
  *****************************************************************************/
-static block_t *ReadCompressed( access_t *p_access, bool *eof )
+static block_t *ReadCompressed( stream_t *p_access, bool *eof )
 {
+    ComContext ctx( COINIT_MULTITHREADED );
+
     access_sys_t   *p_sys = (access_sys_t *)p_access->p_sys;
     /* There must be only 1 elementary stream to produce a valid stream
      * of MPEG or DV data */
@@ -1783,6 +1815,8 @@ out:
  ****************************************************************************/
 static int Demux( demux_t *p_demux )
 {
+    ComContext ctx( COINIT_MULTITHREADED );
+
     access_sys_t *p_sys = (access_sys_t *)p_demux->p_sys;
     int i_found_samples;
 
@@ -1854,7 +1888,7 @@ static int Demux( demux_t *p_demux )
             }
 
             if( i_pts > VLC_TS_INVALID ) {
-                i_pts += (i_pts >= 0) ? +5 : -4;
+                i_pts += 5;
                 i_pts /= 10; /* 100-ns to µs conversion */
                 i_pts += VLC_TS_0;
             }
@@ -1868,7 +1902,7 @@ static int Demux( demux_t *p_demux )
             p_block->i_pts = p_block->i_dts = i_pts;
 
             if( i_pts > VLC_TS_INVALID )
-                es_out_Control( p_demux->out, ES_OUT_SET_PCR, i_pts );
+                es_out_SetPCR( p_demux->out, i_pts );
             es_out_Send( p_demux->out, p_stream->p_es, p_block );
 
             i_samples--;
@@ -1881,7 +1915,7 @@ static int Demux( demux_t *p_demux )
 /*****************************************************************************
  * AccessControl:
  *****************************************************************************/
-static int AccessControl( access_t *p_access, int i_query, va_list args )
+static int AccessControl( stream_t *p_access, int i_query, va_list args )
 {
     access_sys_t *sys = (access_sys_t *)p_access->p_sys;
     bool    *pb_bool;
@@ -2012,27 +2046,31 @@ static int AppendAudioEnabledVDevs( vlc_object_t *p_this, std::list<std::string>
 /*****************************************************************************
  * config variable callback
  *****************************************************************************/
-static int FindDevices( vlc_object_t *p_this, const char *psz_name,
-                            char ***vp, char ***tp )
+static int FindDevices( const char *psz_name, char ***vp, char ***tp )
 {
     /* Find list of devices */
     std::list<std::string> list_devices;
-    if( SUCCEEDED(CoInitializeEx( NULL, COINIT_MULTITHREADED ))
-     || SUCCEEDED(CoInitializeEx( NULL, COINIT_APARTMENTTHREADED )) )
+    try
     {
         bool b_audio = !strcmp( psz_name, CFG_PREFIX "adev" );
 
-        FindCaptureDevice( p_this, NULL, &list_devices, b_audio );
+        // Use STA as this most likely comes from a Qt thread, which is
+        // initialized as STA.
+        ComContext ctx( COINIT_APARTMENTTHREADED );
+
+        FindCaptureDevice( NULL, NULL, &list_devices, b_audio );
 
         if( b_audio )
         {
             std::list<std::string> list_vdevs;
-            FindCaptureDevice( p_this, NULL, &list_vdevs, false );
+            FindCaptureDevice( NULL, NULL, &list_vdevs, false );
             if( !list_vdevs.empty() )
-                AppendAudioEnabledVDevs( p_this, list_devices, list_vdevs );
+                AppendAudioEnabledVDevs( NULL, list_devices, list_vdevs );
         }
-
-        CoUninitialize();
+    }
+    catch (const std::runtime_error& ex)
+    {
+        msg_Err( (vlc_object_t *)NULL, "Failed fetch devices: %s", ex.what() );
     }
 
     unsigned count = 2 + list_devices.size(), i = 2;
@@ -2040,9 +2078,9 @@ static int FindDevices( vlc_object_t *p_this, const char *psz_name,
     char **texts = (char **)xmalloc( count * sizeof(*texts) );
 
     values[0] = strdup( "" );
-    texts[0] = strdup( N_("Default") );
+    texts[0] = strdup( _("Default") );
     values[1] = strdup( "none" );
-    texts[1] = strdup( N_("None") );
+    texts[1] = strdup( _("None") );
 
     for( std::list<std::string>::iterator iter = list_devices.begin();
          iter != list_devices.end();

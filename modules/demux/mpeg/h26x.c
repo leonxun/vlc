@@ -52,6 +52,7 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_INPUT_DEMUX )
     set_description( N_("H264 video demuxer" ) )
     set_capability( "demux", 6 )
+    set_section( N_("H264 video demuxer" ), NULL )
     add_float( "h264-fps", 0.0, FPS_TEXT, FPS_LONGTEXT, true )
     set_callbacks( OpenH264, Close )
     add_shortcut( "h264" )
@@ -62,6 +63,7 @@ vlc_module_begin ()
         set_subcategory( SUBCAT_INPUT_DEMUX )
         set_description( N_("HEVC/H.265 video demuxer" ) )
         set_capability( "demux", 6 )
+        set_section( N_("HEVC/H.265 video demuxer" ), NULL )
         add_float( "hevc-fps", 0.0, FPS_TEXT, FPS_LONGTEXT, true )
         set_callbacks( OpenHEVC, Close )
         add_shortcut( "hevc", "h265" )
@@ -472,7 +474,7 @@ static int Demux( demux_t *p_demux)
                     msg_Dbg( p_demux, "using %.2f fps", (double) p_sys->frame_rate_num / p_sys->frame_rate_den );
                 }
 
-                es_out_Control( p_demux->out, ES_OUT_SET_PCR, date_Get( &p_sys->dts ) );
+                es_out_SetPCR( p_demux->out, date_Get( &p_sys->dts ) );
                 unsigned i_nb_fields;
                 if( i_frame_length > 0 )
                 {

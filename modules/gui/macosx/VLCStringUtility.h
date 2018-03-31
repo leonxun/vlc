@@ -25,13 +25,17 @@
  *****************************************************************************/
 
 #import <Cocoa/Cocoa.h>
+
+#import <vlc_common.h>
 #import <vlc_input.h>
 
-#define _NS(s) [[VLCStringUtility sharedInstance] localizedString: s]
+
+#define _NS(s) ((s) ? toNSStr(vlc_gettext(s)) : @"")
+
 /* Get an alternate version of the string.
  * This string is stored as '1:string' but when displayed it only displays
  * the translated string. the translation should be '1:translatedstring' though */
-#define _ANS(s) [[[VLCStringUtility sharedInstance] localizedString: _(s)] substringFromIndex:2]
+#define _ANS(s) [((s) ? toNSStr(vlc_gettext(s)) : @"") substringFromIndex:2]
 
 #define B64DecNSStr(s) [[VLCStringUtility sharedInstance] b64Decode: s]
 #define B64EncAndFree(s) [[VLCStringUtility sharedInstance] b64EncodeAndFree: s]
@@ -49,16 +53,14 @@ NSString *toNSStr(const char *str);
 unsigned int CocoaKeyToVLC(unichar i_key);
 
 /**
- * Gets the proper variant for an image resource,
- * depending on the os version.
+ * Gets an image resource
  */
-NSImage *imageFromRes(NSString *o_id);
+NSImage *imageFromRes(NSString *name);
 
 @interface VLCStringUtility : NSObject
 
 + (VLCStringUtility *)sharedInstance;
 
-- (NSString *)localizedString:(const char *)psz NS_FORMAT_ARGUMENT(1);
 - (NSString *)wrapString: (NSString *)o_in_string toWidth: (int)i_width;
 - (NSString *)getCurrentTimeAsString:(input_thread_t *)p_input negative:(BOOL)b_negative;
 - (NSString *)stringForTime:(long long int)time;

@@ -220,7 +220,6 @@ static int OpenPacketizer(vlc_object_t *p_this)
     p_sys->i_warnings = 0;
 
     /* Set output properties */
-    p_dec->fmt_out.i_cat = AUDIO_ES;
     p_dec->fmt_out.i_codec = VLC_CODEC_MP4A;
 
     msg_Dbg(p_dec, "running MPEG4 audio packetizer");
@@ -837,7 +836,15 @@ static int LOASParse(decoder_t *p_dec, uint8_t *p_buffer, int i_buffer)
 
     /* Wait for the configuration */
     if (!p_sys->b_latm_cfg)
-        return 0;
+    {
+        /* WAVE_FORMAT_MPEG_LOAS, configuration provided as AAC header :/ */
+        if( p_dec->fmt_in.i_extra > 0 &&
+            p_sys->i_channels && p_sys->i_rate && p_sys->i_frame_length )
+        {
+            p_sys->b_latm_cfg = true;
+        }
+        else return 0;
+    }
 
     /* FIXME do we need to split the subframe into independent packet ? */
     if (p_sys->latm.i_sub_frames > 1)
@@ -971,7 +978,6 @@ static void SetupOutput(decoder_t *p_dec, block_t *p_block)
     p_dec->fmt_out.audio.i_frame_length = p_sys->i_frame_length;
 
 #if 0
-    p_dec->fmt_out.audio.i_original_channels = p_sys->i_channels_conf;
     p_dec->fmt_out.audio.i_physical_channels = p_sys->i_channels_conf;
 #endif
 
@@ -992,6 +998,16 @@ static void Flush(decoder_t *p_dec)
     block_BytestreamEmpty(&p_sys->bytestream);
     date_Set(&p_sys->end_date, VLC_TS_INVALID);
     p_sys->b_discontuinity = true;
+}
+
+static inline bool HasADTSHeader( const uint8_t *p_header )
+{
+    return p_header[0] == 0xff && (p_header[1] & 0xf6) == 0xf0;
+}
+
+static inline bool HasLoasHeader( const uint8_t *p_header )
+{
+    return p_header[0] == 0x56 && (p_header[1] & 0xe0) == 0xe0;
 }
 
 /****************************************************************************
@@ -1017,7 +1033,7 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
         while (block_PeekBytes(&p_sys->bytestream, p_header, 2) == VLC_SUCCESS) {
             /* Look for sync word - should be 0xfff(adts) or 0x2b7(loas) */
             if ((p_sys->i_type == TYPE_ADTS || p_sys->i_type == TYPE_UNKNOWN_NONRAW) &&
-                p_header[0] == 0xff && (p_header[1] & 0xf6) == 0xf0)
+                HasADTSHeader( p_header ) )
             {
                 if (p_sys->i_type != TYPE_ADTS)
                     msg_Dbg(p_dec, "detected ADTS format");
@@ -1027,7 +1043,7 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
                 break;
             }
             else if ((p_sys->i_type == TYPE_LOAS || p_sys->i_type == TYPE_UNKNOWN_NONRAW) &&
-                      p_header[0] == 0x56 && (p_header[1] & 0xe0) == 0xe0)
+                      HasLoasHeader( p_header ) )
             {
                 if (p_sys->i_type != TYPE_LOAS)
                     msg_Dbg(p_dec, "detected LOAS format");
@@ -1044,6 +1060,7 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
             /* Need more data */
             return NULL;
         }
+        /* fallthrough */
 
     case STATE_SYNC:
         /* New frame, set the Presentation Time Stamp */
@@ -1086,6 +1103,7 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
         }
 
         p_sys->i_state = STATE_NEXT_SYNC;
+        /* fallthrough */
 
     case STATE_NEXT_SYNC:
         if (p_sys->bytestream.p_block == NULL) {
@@ -1107,14 +1125,27 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
         }
 
         assert((p_sys->i_type == TYPE_ADTS) || (p_sys->i_type == TYPE_LOAS));
-        if (((p_sys->i_type == TYPE_ADTS) &&
-                    (p_header[0] != 0xff || (p_header[1] & 0xf6) != 0xf0)) ||
-                ((p_sys->i_type == TYPE_LOAS) &&
-                 (p_header[0] != 0x56 || (p_header[1] & 0xe0) != 0xe0))) {
-            msg_Dbg(p_dec, "emulated sync word "
-                    "(no sync on following frame)");
-            p_sys->i_state = STATE_NOSYNC;
-            block_SkipByte(&p_sys->bytestream);
+        if ( (p_sys->i_type == TYPE_ADTS && !HasADTSHeader( p_header )) ||
+             (p_sys->i_type == TYPE_LOAS && !HasLoasHeader( p_header )) )
+        {
+            /* Check spacial padding case. Failing if need more bytes is ok since
+               that should have been sent as a whole block */
+            if( block_PeekOffsetBytes(&p_sys->bytestream,
+                                      p_sys->i_frame_size + p_sys->i_header_size,
+                                      p_header, 3) == VLC_SUCCESS &&
+                p_header[0] == 0x00 &&
+               ((p_sys->i_type == TYPE_ADTS && HasADTSHeader( &p_header[1] )) ||
+                (p_sys->i_type == TYPE_LOAS && !HasLoasHeader( &p_header[1] ))))
+            {
+                p_sys->i_state = STATE_SEND_DATA;
+            }
+            else
+            {
+                msg_Dbg(p_dec, "emulated sync word (no sync on following frame)"
+                               " 0x%"PRIx8" 0x%"PRIx8, p_header[0], p_header[1] );
+                p_sys->i_state = STATE_NOSYNC;
+                block_SkipByte(&p_sys->bytestream);
+            }
             break;
         }
 
@@ -1128,6 +1159,7 @@ static block_t *PacketizeStreamBlock(decoder_t *p_dec, block_t **pp_block)
                     p_sys->i_header_size) != VLC_SUCCESS)
             return NULL; /* Need more data */
         p_sys->i_state = STATE_SEND_DATA;
+        /* fallthrough */
 
     case STATE_SEND_DATA:
         /* When we reach this point we already know we have enough

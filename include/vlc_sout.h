@@ -47,7 +47,7 @@ extern "C" {
  * invalid unsynchronized access) */
 struct sout_instance_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     char *psz_sout;
 
@@ -72,7 +72,7 @@ typedef struct sout_stream_id_sys_t  sout_stream_id_sys_t;
 /** Stream output access_output */
 struct sout_access_out_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     module_t                *p_module;
     char                    *psz_access;
@@ -120,7 +120,7 @@ static inline bool sout_AccessOutCanControlPace( sout_access_out_t *p_ao )
 /** Muxer structure */
 struct  sout_mux_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
     module_t            *p_module;
 
     sout_instance_t     *p_sout;
@@ -196,7 +196,7 @@ enum sout_stream_query_e {
 
 struct sout_stream_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     module_t          *p_module;
     sout_instance_t   *p_sout;
@@ -246,16 +246,18 @@ static inline void sout_StreamFlush( sout_stream_t *s,
         s->pf_flush( s, id );
 }
 
+static inline int sout_StreamControlVa( sout_stream_t *s, int i_query, va_list args )
+{
+    return s->pf_control ? s->pf_control( s, i_query, args ) : VLC_EGENERIC;
+}
+
 static inline int sout_StreamControl( sout_stream_t *s, int i_query, ... )
 {
     va_list args;
     int     i_result;
 
     va_start( args, i_query );
-    if ( !s->pf_control )
-        i_result = VLC_EGENERIC;
-    else
-        i_result = s->pf_control( s, i_query, args );
+    i_result = sout_StreamControlVa( s, i_query, args );
     va_end( args );
     return i_result;
 }

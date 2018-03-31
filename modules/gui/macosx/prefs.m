@@ -59,7 +59,7 @@
 #import "VLCSimplePrefsController.h"
 #import "prefs_widgets.h"
 #import "VLCCoreInteraction.h"
-#import <vlc_keys.h>
+#import <vlc_actions.h>
 #import <vlc_modules.h>
 #import <vlc_plugin.h>
 
@@ -87,7 +87,7 @@
     NSMutableArray *_options;
     NSMutableArray *_subviews;
 }
-@property (readwrite, weak) VLCPrefs *prefsViewController;
+@property (readwrite, unsafe_unretained) VLCPrefs *prefsViewController;
 
 - (id)initWithName:(NSString*)name;
 
@@ -194,6 +194,7 @@
     [_prefsView setHasVerticalScroller: YES];
     [_prefsView setDrawsBackground: NO];
     [_prefsView setDocumentView: o_emptyView];
+    [self.window layoutIfNeeded];
     [_tree selectRowIndexes: [NSIndexSet indexSetWithIndex: 0] byExtendingSelection: NO];
 }
 
@@ -214,7 +215,7 @@
 {
     /* TODO: call savePrefs on Root item */
     [_rootTreeItem applyChanges];
-    [[VLCCoreInteraction sharedInstance] fixPreferences];
+    [[VLCCoreInteraction sharedInstance] fixIntfSettings];
     config_SaveConfigFile(getIntf());
     [self.window orderOut:self];
 }
@@ -275,6 +276,28 @@
     objectValueForTableColumn:(NSTableColumn *)tableColumn byItem:(id)item
 {
     return (item == nil) ? @"" : [item name];
+}
+
+#pragma mark -
+#pragma mark split view delegate
+- (CGFloat)splitView:(NSSplitView *)splitView constrainMaxCoordinate:(CGFloat)proposedMax ofSubviewAt:(NSInteger)dividerIndex
+{
+    return 300.;
+}
+
+- (CGFloat)splitView:(NSSplitView *)splitView constrainMinCoordinate:(CGFloat)proposedMin ofSubviewAt:(NSInteger)dividerIndex
+{
+    return 100.;
+}
+
+- (BOOL)splitView:(NSSplitView *)splitView canCollapseSubview:(NSView *)subview
+{
+    return NO;
+}
+
+- (BOOL)splitView:(NSSplitView *)splitView shouldAdjustSizeOfSubview:(NSView *)subview
+{
+    return [splitView.subviews objectAtIndex:0] != subview;
 }
 
 @end

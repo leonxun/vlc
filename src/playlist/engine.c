@@ -34,6 +34,7 @@
 #include <vlc_playlist.h>
 #include <vlc_interface.h>
 #include <vlc_http.h>
+#include <vlc_renderer_discovery.h>
 #include "playlist_internal.h"
 #include "input/resource.h"
 
@@ -193,9 +194,6 @@ playlist_t *playlist_Create( vlc_object_t *p_parent )
     if( !p )
         return NULL;
 
-    static_assert( offsetof( playlist_private_t, public_data ) == 0,
-                   "playlist_private_t.public_data must be at offset 0" );
-
     p_playlist = &p->public_data;
 
     p->input_tree = NULL;
@@ -253,6 +251,7 @@ playlist_t *playlist_Create( vlc_object_t *p_parent )
     pl_priv(p_playlist)->status.p_item = NULL;
     pl_priv(p_playlist)->status.p_node = p_playlist->p_playing;
     pl_priv(p_playlist)->request.b_request = false;
+    p->request.input_dead = false;
 
     if (ml != NULL)
         playlist_MLLoad( p_playlist );
@@ -313,6 +312,8 @@ void playlist_Destroy( playlist_t *p_playlist )
     /* Release input resources */
     assert( p_sys->p_input == NULL );
     input_resource_Release( p_sys->p_input_resource );
+    if( p_sys->p_renderer )
+        vlc_renderer_item_release( p_sys->p_renderer );
 
     if( p_playlist->p_media_library != NULL )
         playlist_MLDump( p_playlist );
@@ -443,6 +444,10 @@ static void VariablesInit( playlist_t *p_playlist )
     var_Create( p_playlist, "video-splitter", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
     var_AddCallback( p_playlist, "video-splitter", VideoSplitterCallback, NULL );
 
+    var_Create( p_playlist, "video-filter", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
+    var_Create( p_playlist, "sub-source", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
+    var_Create( p_playlist, "sub-filter", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
+
     /* sout variables */
     var_Create( p_playlist, "sout", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
     var_Create( p_playlist, "demux-filter", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
@@ -456,10 +461,14 @@ static void VariablesInit( playlist_t *p_playlist )
     var_Create( p_playlist, "video-wallpaper", VLC_VAR_BOOL | VLC_VAR_DOINHERIT );
 
     /* Audio output parameters */
+    var_Create( p_playlist, "audio-filter", VLC_VAR_STRING | VLC_VAR_DOINHERIT );
     var_Create( p_playlist, "audio-device", VLC_VAR_STRING );
     var_Create( p_playlist, "mute", VLC_VAR_BOOL );
     var_Create( p_playlist, "volume", VLC_VAR_FLOAT );
     var_SetFloat( p_playlist, "volume", -1.f );
+
+    var_Create( p_playlist, "sub-text-scale",
+               VLC_VAR_INTEGER | VLC_VAR_DOINHERIT | VLC_VAR_ISCOMMAND );
 }
 
 playlist_item_t * playlist_CurrentPlayingItem( playlist_t * p_playlist )

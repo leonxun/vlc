@@ -35,7 +35,6 @@
 #include <vlc_plugin.h>
 #include <vlc_codec.h>
 #include <vlc_block_helper.h>
-#include <vlc_memory.h>
 #include <vlc_timestamp_helper.h>
 #include <vlc_threads.h>
 #include <vlc_bits.h>
@@ -113,6 +112,7 @@ struct decoder_sys_t
         {
             void *p_surface, *p_jsurface;
             unsigned i_angle;
+            unsigned i_input_width, i_input_height;
             unsigned int i_stride, i_slice_height;
             int i_pixel_format;
             struct hxxx_helper hh;
@@ -120,6 +120,7 @@ struct decoder_sys_t
             picture_sys_t** pp_inflight_pictures;
             unsigned int i_inflight_pictures;
             timestamp_fifo_t *timestamp_fifo;
+            int i_mpeg_dar_num, i_mpeg_dar_den;
         } video;
         struct {
             date_t i_end_date;
@@ -142,6 +143,7 @@ static void CloseDecoder(vlc_object_t *);
 
 static int Video_OnNewBlock(decoder_t *, block_t **);
 static int VideoHXXX_OnNewBlock(decoder_t *, block_t **);
+static int VideoMPEG2_OnNewBlock(decoder_t *, block_t **);
 static int VideoVC1_OnNewBlock(decoder_t *, block_t **);
 static void Video_OnFlush(decoder_t *);
 static int Video_ProcessOutput(decoder_t *, mc_api_out *, picture_t **,
@@ -180,7 +182,7 @@ vlc_module_begin ()
     set_category(CAT_INPUT)
     set_subcategory(SUBCAT_INPUT_VCODEC)
     set_section(N_("Decoding"), NULL)
-    set_capability("decoder", 0) /* Only enabled via commandline arguments */
+    set_capability("video decoder", 0) /* Only enabled via commandline arguments */
     add_bool(CFG_PREFIX "dr", true,
              DIRECTRENDERING_TEXT, DIRECTRENDERING_LONGTEXT, true)
     add_bool(CFG_PREFIX "audio", false,
@@ -190,8 +192,16 @@ vlc_module_begin ()
     set_callbacks(OpenDecoderNdk, CloseDecoder)
     add_shortcut("mediacodec_ndk")
     add_submodule ()
+        set_capability("audio decoder", 0)
+        set_callbacks(OpenDecoderNdk, CloseDecoder)
+        add_shortcut("mediacodec_ndk")
+    add_submodule ()
         set_description("Video decoder using Android MediaCodec via JNI")
-        set_capability("decoder", 0)
+        set_capability("video decoder", 0)
+        set_callbacks(OpenDecoderJni, CloseDecoder)
+        add_shortcut("mediacodec_jni")
+    add_submodule ()
+        set_capability("audio decoder", 0)
         set_callbacks(OpenDecoderJni, CloseDecoder)
         add_shortcut("mediacodec_jni")
 vlc_module_end ()
@@ -237,6 +247,23 @@ static int CSDDup(decoder_t *p_dec, const void *p_buf, size_t i_buf)
     return VLC_SUCCESS;
 }
 
+static void HXXXInitSize(decoder_t *p_dec, bool *p_size_changed)
+{
+    if (p_size_changed)
+    {
+        decoder_sys_t *p_sys = p_dec->p_sys;
+        struct hxxx_helper *hh = &p_sys->video.hh;
+        unsigned i_w, i_h, i_vw, i_vh;
+        hxxx_helper_get_current_picture_size(hh, &i_w, &i_h, &i_vw, &i_vh);
+
+        *p_size_changed = (i_w != p_sys->video.i_input_width
+                        || i_h != p_sys->video.i_input_height);
+        p_sys->video.i_input_width = i_w;
+        p_sys->video.i_input_height = i_h;
+        /* fmt_out video size will be updated by mediacodec output callback */
+    }
+}
+
 /* Fill the p_sys->p_csd struct with H264 Parameter Sets */
 static int H264SetCSD(decoder_t *p_dec, bool *p_size_changed)
 {
@@ -249,31 +276,34 @@ static int H264SetCSD(decoder_t *p_dec, bool *p_size_changed)
     if (p_spspps_blocks != NULL)
         CSDInit(p_dec, p_spspps_blocks, 2);
 
-    unsigned i_w, i_h, i_vw, i_vh;
-    h264_helper_get_current_picture_size(hh, &i_w, &i_h, &i_vw, &i_vh);
+    HXXXInitSize(p_dec, p_size_changed);
 
-    if (p_size_changed)
-        *p_size_changed = (i_w != p_dec->fmt_out.video.i_width
-                        || i_h != p_dec->fmt_out.video.i_height);
-
-    p_dec->fmt_out.video.i_visible_width =
-    p_dec->fmt_out.video.i_width = i_w;
-    p_dec->fmt_out.video.i_visible_height =
-    p_dec->fmt_out.video.i_height = i_h;
     return VLC_SUCCESS;
 }
 
 /* Fill the p_sys->p_csd struct with HEVC Parameter Sets */
 static int HEVCSetCSD(decoder_t *p_dec, bool *p_size_changed)
 {
-    (void) p_size_changed;
     decoder_sys_t *p_sys = p_dec->p_sys;
     struct hxxx_helper *hh = &p_sys->video.hh;
 
-    assert(hh->hevc.i_annexb_config_nal > 0);
+    assert(hh->hevc.i_vps_count > 0 || hh->hevc.i_sps_count > 0 ||
+           hh->hevc.i_pps_count > 0 );
 
-    return CSDDup(p_dec, hh->hevc.p_annexb_config_nal,
-                  hh->hevc.i_annexb_config_nal);
+    block_t *p_xps_blocks = hevc_helper_get_annexb_config(hh);
+    if (p_xps_blocks != NULL)
+    {
+        block_t *p_monolith = block_ChainGather(p_xps_blocks);
+        if (p_monolith == NULL)
+        {
+            block_ChainRelease(p_xps_blocks);
+            return VLC_ENOMEM;
+        }
+        CSDInit(p_dec, p_monolith, 1);
+    }
+
+    HXXXInitSize(p_dec, p_size_changed);
+    return VLC_SUCCESS;
 }
 
 static int ParseVideoExtraH264(decoder_t *p_dec, uint8_t *p_extra, int i_extra)
@@ -311,7 +341,8 @@ static int ParseVideoExtraHEVC(decoder_t *p_dec, uint8_t *p_extra, int i_extra)
 
     p_sys->pf_on_new_block = VideoHXXX_OnNewBlock;
 
-    if (hh->hevc.i_annexb_config_nal > 0)
+    if (hh->hevc.i_vps_count > 0 || hh->hevc.i_sps_count > 0 ||
+        hh->hevc.i_pps_count > 0 )
         return HEVCSetCSD(p_dec, NULL);
     return VLC_SUCCESS;
 }
@@ -370,7 +401,6 @@ static int ParseVideoExtraWmv3(decoder_t *p_dec, uint8_t *p_extra, int i_extra)
     SetDWLE(&(p_data[12]), p_dec->fmt_in.video.i_height);
     SetDWLE(&(p_data[16]), p_dec->fmt_in.video.i_width);
 
-    p_dec->p_sys->pf_on_new_block = VideoVC1_OnNewBlock;
     return CSDDup(p_dec, p_data, sizeof(p_data));
 }
 
@@ -393,19 +423,32 @@ static int ParseExtra(decoder_t *p_dec)
     case VLC_CODEC_MP4V:
         if (!i_extra && p_sys->api.i_quirks & MC_API_VIDEO_QUIRKS_ADAPTIVE)
             p_sys->b_adaptive = true;
-        /* fall through */
-    default:
-        /* Set default CSD */
-        if (p_dec->fmt_in.i_extra)
-            return CSDDup(p_dec, p_dec->fmt_in.p_extra, p_dec->fmt_in.i_extra);
-        else
-            return VLC_SUCCESS;
+        break;
+    case VLC_CODEC_MPGV:
+    case VLC_CODEC_MP2V:
+        p_dec->p_sys->pf_on_new_block = VideoMPEG2_OnNewBlock;
+        break;
     }
+    /* Set default CSD */
+    if (p_dec->fmt_in.i_extra)
+        return CSDDup(p_dec, p_dec->fmt_in.p_extra, p_dec->fmt_in.i_extra);
+    else
+        return VLC_SUCCESS;
 }
 
 static int UpdateVout(decoder_t *p_dec)
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
+
+    if ((p_dec->fmt_in.i_codec == VLC_CODEC_MPGV ||
+         p_dec->fmt_in.i_codec == VLC_CODEC_MP2V) &&
+        (p_sys->video.i_mpeg_dar_num * p_sys->video.i_mpeg_dar_den != 0))
+    {
+        p_dec->fmt_out.video.i_sar_num =
+            p_sys->video.i_mpeg_dar_num * p_dec->fmt_out.video.i_height;
+        p_dec->fmt_out.video.i_sar_den =
+            p_sys->video.i_mpeg_dar_den * p_dec->fmt_out.video.i_width;
+    }
 
     /* If MediaCodec can handle the rotation, reset the orientation to
      * Normal in order to ask the vout not to rotate. */
@@ -413,8 +456,7 @@ static int UpdateVout(decoder_t *p_dec)
     {
         assert(p_dec->fmt_out.i_codec == VLC_CODEC_ANDROID_OPAQUE);
         p_dec->fmt_out.video.orientation = p_dec->fmt_in.video.orientation;
-        video_format_ApplyRotation(&p_dec->fmt_out.video,
-                                   &p_dec->fmt_out.video);
+        video_format_TransformTo(&p_dec->fmt_out.video, ORIENT_NORMAL);
     }
 
     if (decoder_UpdateVideoFormat(p_dec) != 0)
@@ -494,7 +536,7 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
     decoder_t *p_dec = (decoder_t *)p_this;
     decoder_sys_t *p_sys;
     int i_ret;
-    size_t i_h264_profile = 0;
+    int i_profile = p_dec->fmt_in.i_profile;
     const char *mime = NULL;
 
     /* Video or Audio if "mediacodec-audio" bool is true */
@@ -515,20 +557,34 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
             return VLC_EGENERIC;
 
         switch (p_dec->fmt_in.i_codec) {
-        case VLC_CODEC_HEVC: mime = "video/hevc"; break;
-        case VLC_CODEC_H264: mime = "video/avc"; break;
+        case VLC_CODEC_HEVC:
+            if (i_profile == -1)
+            {
+                uint8_t i_hevc_profile;
+                if (hevc_get_profile_level(&p_dec->fmt_in, &i_hevc_profile, NULL, NULL))
+                    i_profile = i_hevc_profile;
+            }
+            mime = "video/hevc";
+            break;
+        case VLC_CODEC_H264:
+            if (i_profile == -1)
+            {
+                uint8_t i_h264_profile;
+                if (h264_get_profile_level(&p_dec->fmt_in, &i_h264_profile, NULL, NULL))
+                    i_profile = i_h264_profile;
+            }
+            mime = "video/avc";
+            break;
         case VLC_CODEC_H263: mime = "video/3gpp"; break;
         case VLC_CODEC_MP4V: mime = "video/mp4v-es"; break;
+        case VLC_CODEC_MPGV:
+        case VLC_CODEC_MP2V:
+            mime = "video/mpeg2";
+            break;
         case VLC_CODEC_WMV3: mime = "video/x-ms-wmv"; break;
         case VLC_CODEC_VC1:  mime = "video/wvc1"; break;
         case VLC_CODEC_VP8:  mime = "video/x-vnd.on2.vp8"; break;
         case VLC_CODEC_VP9:  mime = "video/x-vnd.on2.vp9"; break;
-        /* FIXME: mpeg2 is disabled: sar num/den can't be updated from
-         * MediaCodec. Use avcodec instead that will update it. The proper
-         * solution is to update sar from a mpeg2 packetizer.
-         *
-         * case VLC_CODEC_MPGV: mime = "video/mpeg2"; break;
-         */
         }
     }
     else
@@ -570,27 +626,22 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
     p_sys->api.i_codec = p_dec->fmt_in.i_codec;
     p_sys->api.i_cat = p_dec->fmt_in.i_cat;
     p_sys->api.psz_mime = mime;
-
-    if (p_dec->fmt_in.i_codec == VLC_CODEC_H264)
-    {
-        uint8_t i_profile;
-        if (h264_get_profile_level(&p_dec->fmt_in, &i_profile, NULL, NULL))
-            i_h264_profile = i_profile;
-    }
+    p_sys->video.i_mpeg_dar_num = 0;
+    p_sys->video.i_mpeg_dar_den = 0;
 
     if (pf_init(&p_sys->api) != 0)
     {
         free(p_sys);
         return VLC_EGENERIC;
     }
-    if (p_sys->api.configure(&p_sys->api, i_h264_profile) != 0)
+    if (p_sys->api.configure(&p_sys->api, i_profile) != 0)
     {
         /* If the device can't handle video/wvc1,
          * it can probably handle video/x-ms-wmv */
         if (!strcmp(mime, "video/wvc1") && p_dec->fmt_in.i_codec == VLC_CODEC_VC1)
         {
             p_sys->api.psz_mime = "video/x-ms-wmv";
-            if (p_sys->api.configure(&p_sys->api, i_h264_profile) != 0)
+            if (p_sys->api.configure(&p_sys->api, i_profile) != 0)
             {
                 p_sys->api.clean(&p_sys->api);
                 free(p_sys);
@@ -606,12 +657,6 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
     }
 
     p_dec->p_sys = p_sys;
-
-    p_dec->fmt_out.i_cat = p_dec->fmt_in.i_cat;
-    p_dec->fmt_out.video = p_dec->fmt_in.video;
-    p_dec->fmt_out.audio = p_dec->fmt_in.audio;
-    p_dec->fmt_out.video.i_visible_width = p_dec->fmt_out.video.i_width;
-    p_dec->fmt_out.video.i_visible_height = p_dec->fmt_out.video.i_height;
 
     vlc_mutex_init(&p_sys->lock);
     vlc_cond_init(&p_sys->cond);
@@ -665,6 +710,18 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
             else
                 p_sys->video.i_angle = 0;
 
+            p_dec->fmt_out.video = p_dec->fmt_in.video;
+            if (p_dec->fmt_out.video.i_sar_num * p_dec->fmt_out.video.i_sar_den == 0)
+            {
+                p_dec->fmt_out.video.i_sar_num = 1;
+                p_dec->fmt_out.video.i_sar_den = 1;
+            }
+
+            p_sys->video.i_input_width =
+            p_dec->fmt_out.video.i_visible_width = p_dec->fmt_out.video.i_width;
+            p_sys->video.i_input_height =
+            p_dec->fmt_out.video.i_visible_height = p_dec->fmt_out.video.i_height;
+
             if (UpdateVout(p_dec) != VLC_SUCCESS)
             {
                 msg_Err(p_dec, "Opaque Vout request failed");
@@ -685,6 +742,8 @@ static int OpenDecoder(vlc_object_t *p_this, pf_MediaCodecApi_init pf_init)
             msg_Warn(p_dec, "codec need a valid channel count");
             goto bailout;
         }
+
+        p_dec->fmt_out.audio = p_dec->fmt_in.audio;
     }
 
     /* Try first to configure CSD */
@@ -807,6 +866,14 @@ static void ReleasePicture(decoder_t *p_dec, unsigned i_index, bool b_render)
     p_sys->api.release_out(&p_sys->api, i_index, b_render);
 }
 
+static void ReleasePictureTs(decoder_t *p_dec, unsigned i_index, mtime_t i_ts)
+{
+    decoder_sys_t *p_sys = p_dec->p_sys;
+    assert(p_sys->api.release_out_ts);
+
+    p_sys->api.release_out_ts(&p_sys->api, i_index, i_ts * INT64_C(1000));
+}
+
 static void InvalidateAllPictures(decoder_t *p_dec)
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
@@ -824,6 +891,8 @@ static int InsertInflightPicture(decoder_t *p_dec, picture_sys_t *p_picsys)
     {
         p_picsys->hw.p_dec = p_dec;
         p_picsys->hw.pf_release = ReleasePicture;
+        if (p_sys->api.release_out_ts)
+            p_picsys->hw.pf_release_ts = ReleasePictureTs;
         TAB_APPEND_CAST((picture_sys_t **),
                         p_sys->video.i_inflight_pictures,
                         p_sys->video.pp_inflight_pictures,
@@ -1071,7 +1140,6 @@ static int Audio_ProcessOutput(decoder_t *p_dec, mc_api_out *p_out,
             msg_Warn(p_dec, "need channel extraction: %d -> %d",
                      p_sys->audio.i_channels, i_channels_dst);
 
-        p_dec->fmt_out.audio.i_original_channels =
         p_dec->fmt_out.audio.i_physical_channels = i_layout_dst;
         aout_FormatPrepare(&p_dec->fmt_out.audio);
 
@@ -1509,7 +1577,11 @@ static int VideoHXXX_OnNewBlock(decoder_t *p_dec, block_t **pp_block)
                 i_ret = VLC_EGENERIC;
             break;
         case VLC_CODEC_HEVC:
-            i_ret = HEVCSetCSD(p_dec, &b_size_changed);
+            if (hh->hevc.i_vps_count > 0 || hh->hevc.i_sps_count > 0 ||
+                hh->hevc.i_pps_count > 0 )
+                i_ret = HEVCSetCSD(p_dec, &b_size_changed);
+            else
+                i_ret = VLC_EGENERIC;
             break;
         }
         if (i_ret != VLC_SUCCESS)
@@ -1528,6 +1600,39 @@ static int VideoHXXX_OnNewBlock(decoder_t *p_dec, block_t **pp_block)
     }
 
     return Video_OnNewBlock(p_dec, pp_block);
+}
+
+static int VideoMPEG2_OnNewBlock(decoder_t *p_dec, block_t **pp_block)
+{
+    if (pp_block == NULL || (*pp_block)->i_buffer <= 7)
+        return 1;
+
+    decoder_sys_t *p_sys = p_dec->p_sys;
+    const int startcode = (*pp_block)->p_buffer[3];
+
+    /* DAR aspect ratio from the DVD MPEG2 standard */
+    static const int mpeg2_aspect[16][2] =
+    {
+        {0,0}, /* reserved */
+        {0,0}, /* DAR = 0:0 will result in SAR = 1:1 */
+        {4,3}, {16,9}, {221,100},
+        /* reserved */
+        {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0},
+        {0,0}, {0,0}
+    };
+
+    if (startcode == 0xB3 /* SEQUENCE_HEADER_STARTCODE */)
+    {
+        int mpeg_dar_code = (*pp_block)->p_buffer[7] >> 4;
+
+        if (mpeg_dar_code >= 16)
+            return 0;
+
+        p_sys->video.i_mpeg_dar_num = mpeg2_aspect[mpeg_dar_code][0];
+        p_sys->video.i_mpeg_dar_den = mpeg2_aspect[mpeg_dar_code][1];
+    }
+
+    return 1;
 }
 
 static int VideoVC1_OnNewBlock(decoder_t *p_dec, block_t **pp_block)

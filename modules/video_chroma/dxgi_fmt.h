@@ -29,7 +29,14 @@
 #include <vlc_common.h>
 #include <vlc_fourcc.h>
 
-#define D3D11_MAX_SHADER_VIEW  2
+#define GPU_MANUFACTURER_AMD           0x1002
+#define GPU_MANUFACTURER_NVIDIA        0x10DE
+#define GPU_MANUFACTURER_VIA           0x1106
+#define GPU_MANUFACTURER_INTEL         0x8086
+#define GPU_MANUFACTURER_S3            0x5333
+#define GPU_MANUFACTURER_QUALCOMM  0x4D4F4351
+
+#define D3D11_MAX_SHADER_VIEW  3
 
 typedef struct
 {
@@ -42,47 +49,11 @@ typedef struct
     DXGI_FORMAT  resourceFormat[D3D11_MAX_SHADER_VIEW];
 } d3d_format_t;
 
-extern const char *DxgiFormatToStr(DXGI_FORMAT format);
-extern vlc_fourcc_t DxgiFormatFourcc(DXGI_FORMAT format);
-extern const d3d_format_t *GetRenderFormatList(void);
-extern void DxgiFormatMask(DXGI_FORMAT format, video_format_t *);
-
-typedef struct ID3D11Device ID3D11Device;
-bool isXboxHardware(ID3D11Device *d3ddev);
-IDXGIAdapter *D3D11DeviceAdapter(ID3D11Device *d3ddev);
-
-static inline bool DeviceSupportsFormat(ID3D11Device *d3ddevice,
-                                        DXGI_FORMAT format, UINT supportFlags)
-{
-    UINT i_formatSupport;
-    return SUCCEEDED( ID3D11Device_CheckFormatSupport(d3ddevice, format,
-                                                      &i_formatSupport) )
-            && ( i_formatSupport & supportFlags ) == supportFlags;
-}
-
-static inline const d3d_format_t *FindD3D11Format(ID3D11Device *d3ddevice,
-                                                  vlc_fourcc_t i_src_chroma,
-                                                  uint8_t bits_per_channel,
-                                                  bool allow_opaque,
-                                                  UINT supportFlags)
-{
-    supportFlags |= D3D11_FORMAT_SUPPORT_TEXTURE2D;
-    for (const d3d_format_t *output_format = GetRenderFormatList();
-         output_format->name != NULL; ++output_format)
-    {
-        if (i_src_chroma && i_src_chroma != output_format->fourcc)
-            continue;
-        if (bits_per_channel && bits_per_channel > output_format->bitsPerChannel)
-            continue;
-        if (!allow_opaque && (output_format->fourcc == VLC_CODEC_D3D11_OPAQUE ||
-                              output_format->fourcc == VLC_CODEC_D3D11_OPAQUE_10B))
-            continue;
-
-        if( DeviceSupportsFormat( d3ddevice, output_format->formatTexture,
-                                  supportFlags ) )
-            return output_format;
-    }
-    return NULL;
-}
+const char *DxgiFormatToStr(DXGI_FORMAT format);
+vlc_fourcc_t DxgiFormatFourcc(DXGI_FORMAT format);
+const d3d_format_t *GetRenderFormatList(void);
+void DxgiFormatMask(DXGI_FORMAT format, video_format_t *);
+const char *DxgiVendorStr(int gpu_vendor);
+UINT DxgiResourceCount(const d3d_format_t *);
 
 #endif /* include-guard */

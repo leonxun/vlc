@@ -37,10 +37,8 @@
 
 #include <assert.h>
 
-#if HAS_QT5
-# include <QWindow>
-# include <qpa/qplatformnativeinterface.h>
-#endif
+#include <QWindow>
+#include <qpa/qplatformnativeinterface.h>
 
 #define WM_APPCOMMAND 0x0319
 
@@ -106,32 +104,21 @@ MainInterfaceWin32::~MainInterfaceWin32()
 
 HWND MainInterfaceWin32::WinId( QWidget *w )
 {
-#if HAS_QT5
     if( w && w->windowHandle() )
         return static_cast<HWND>(QGuiApplication::platformNativeInterface()->
             nativeResourceForWindow("handle", w->windowHandle()));
     else
         return 0;
-#else
-    return winId();
-#endif
 }
 
-#if !HAS_QT5
-static const int PremultipliedAlpha = QPixmap::PremultipliedAlpha;
-static HBITMAP qt_pixmapToWinHBITMAP(const QPixmap &p, int hbitmapFormat = 0)
-{
-    return p.toWinHBITMAP((enum QBitmap::HBitmapFormat)hbitmapFormat);
-}
-#else
 Q_GUI_EXPORT HBITMAP qt_pixmapToWinHBITMAP(const QPixmap &p, int hbitmapFormat = 0);
+
 enum HBitmapFormat
 {
     NoAlpha,
     PremultipliedAlpha,
     Alpha
 };
-#endif
 
 void MainInterfaceWin32::createTaskBarButtons()
 {
@@ -157,7 +144,9 @@ void MainInterfaceWin32::createTaskBarButtons()
     p_taskbl = (ITaskbarList3 *)pv;
     p_taskbl->HrInit();
 
-    himl = ImageList_Create( 16 /*cx*/, 16 /*cy*/, ILC_COLOR32 /*flags*/,
+    int iconX = GetSystemMetrics(SM_CXSMICON);
+    int iconY = GetSystemMetrics(SM_CYSMICON);
+    himl = ImageList_Create( iconX /*cx*/, iconY /*cy*/, ILC_COLOR32 /*flags*/,
                              4 /*cInitial*/, 0 /*cGrow*/);
     if( himl == NULL )
     {
@@ -167,10 +156,10 @@ void MainInterfaceWin32::createTaskBarButtons()
         return;
     }
 
-    QPixmap img   = QPixmap(":/win7/prev");
-    QPixmap img2  = QPixmap(":/win7/pause");
-    QPixmap img3  = QPixmap(":/win7/play");
-    QPixmap img4  = QPixmap(":/win7/next");
+    QPixmap img   = QPixmap(":/win7/prev.svg").scaled( iconX, iconY );
+    QPixmap img2  = QPixmap(":/win7/pause.svg").scaled( iconX, iconY );
+    QPixmap img3  = QPixmap(":/win7/play.svg").scaled( iconX, iconY );
+    QPixmap img4  = QPixmap(":/win7/next.svg").scaled( iconX, iconY );
     QBitmap mask  = img.createMaskFromColor(Qt::transparent);
     QBitmap mask2 = img2.createMaskFromColor(Qt::transparent);
     QBitmap mask3 = img3.createMaskFromColor(Qt::transparent);
@@ -226,12 +215,10 @@ void MainInterfaceWin32::createTaskBarButtons()
         changeThumbbarButtons( THEMIM->getIM()->playingStatus() );
 }
 
-#if HAS_QT5
 bool MainInterfaceWin32::nativeEvent(const QByteArray &, void *message, long *result)
 {
     return winEvent( static_cast<MSG*>( message ), result );
 }
-#endif
 
 bool MainInterfaceWin32::winEvent ( MSG * msg, long * result )
 {
@@ -344,12 +331,8 @@ void MainInterfaceWin32::toggleUpdateSystrayMenuWhenVisible()
      * but ignore the ones always on top
      * and the ones which can't be activated */
     HWND winId;
-#if HAS_QT5
     QWindow *window = windowHandle();
     winId = static_cast<HWND>(QGuiApplication::platformNativeInterface()->nativeResourceForWindow("handle", window));
-#else
-    winId = internalWinId();
-#endif
 
     WINDOWINFO wi;
     HWND hwnd;
@@ -364,6 +347,46 @@ void MainInterfaceWin32::toggleUpdateSystrayMenuWhenVisible()
         hide();
     else
         activateWindow();
+}
+
+
+void MainInterfaceWin32::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+
+    /*
+     * Detects if window placement is not in its normal position (ex: win7 aero snap)
+     * This function compares the normal position (non snapped) to the current position.
+     * The current position is translated from screen referential to workspace referential
+     * to workspace referential
+     */
+    b_isWindowTiled = false;
+    HWND winHwnd = WinId( this );
+
+    WINDOWPLACEMENT windowPlacement;
+    windowPlacement.length = sizeof( windowPlacement );
+    if ( GetWindowPlacement( winHwnd, &windowPlacement ) == 0 )
+        return;
+
+    if ( windowPlacement.showCmd != SW_SHOWNORMAL )
+        return;
+
+    HMONITOR monitor = MonitorFromWindow( winHwnd, MONITOR_DEFAULTTONEAREST );
+
+    MONITORINFO monitorInfo;
+    monitorInfo.cbSize = sizeof( monitorInfo );
+    if ( GetMonitorInfo( monitor, &monitorInfo )  == 0 )
+        return;
+
+    RECT windowRect;
+    if ( GetWindowRect( winHwnd, &windowRect ) == 0 )
+        return;
+
+    OffsetRect( &windowRect,
+                monitorInfo.rcMonitor.left - monitorInfo.rcWork.left ,
+                monitorInfo.rcMonitor.top - monitorInfo.rcWork.top );
+
+    b_isWindowTiled = ( EqualRect( &windowPlacement.rcNormalPosition, &windowRect ) == 0 );
 }
 
 void MainInterfaceWin32::reloadPrefs()

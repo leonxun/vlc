@@ -47,10 +47,10 @@ static_assert( VLC_RENDERER_CAN_AUDIO == LIBVLC_RENDERER_CAN_AUDIO &&
                VLC_RENDERER_CAN_VIDEO == LIBVLC_RENDERER_CAN_VIDEO,
               "core/libvlc renderer flags mismatch" );
 
-const vlc_renderer_item_t *
-libvlc_renderer_item_to_vlc( const libvlc_renderer_item_t *p_item )
+vlc_renderer_item_t *
+libvlc_renderer_item_to_vlc( libvlc_renderer_item_t *p_item )
 {
-    return (const vlc_renderer_item_t*) p_item;
+    return (vlc_renderer_item_t*) p_item;
 }
 
 static void renderer_discovery_item_added( vlc_renderer_discovery_t *rd,
@@ -90,28 +90,41 @@ static void renderer_discovery_item_removed( vlc_renderer_discovery_t *rd,
     vlc_renderer_item_release( p_item );
 }
 
+libvlc_renderer_item_t *
+libvlc_renderer_item_hold(libvlc_renderer_item_t *p_item)
+{
+    vlc_renderer_item_hold( (vlc_renderer_item_t *) p_item );
+    return p_item;
+}
+
+void
+libvlc_renderer_item_release(libvlc_renderer_item_t *p_item)
+{
+    vlc_renderer_item_release( (vlc_renderer_item_t *) p_item );
+}
+
 const char *
 libvlc_renderer_item_name( const libvlc_renderer_item_t *p_item )
 {
-    return vlc_renderer_item_name( (vlc_renderer_item_t *) p_item );
+    return vlc_renderer_item_name( (const vlc_renderer_item_t *) p_item );
 }
 
 const char *
 libvlc_renderer_item_type( const libvlc_renderer_item_t *p_item )
 {
-    return vlc_renderer_item_type( (vlc_renderer_item_t *) p_item );
+    return vlc_renderer_item_type( (const vlc_renderer_item_t *) p_item );
 }
 
 const char *
 libvlc_renderer_item_icon_uri( const libvlc_renderer_item_t *p_item )
 {
-    return vlc_renderer_item_icon_uri( (vlc_renderer_item_t *) p_item );
+    return vlc_renderer_item_icon_uri( (const vlc_renderer_item_t *) p_item );
 }
 
 int
 libvlc_renderer_item_flags( const libvlc_renderer_item_t *p_item )
 {
-    return vlc_renderer_item_flags( (vlc_renderer_item_t *) p_item );
+    return vlc_renderer_item_flags( (const vlc_renderer_item_t *) p_item );
 }
 
 libvlc_renderer_discoverer_t *
@@ -161,7 +174,10 @@ void
 libvlc_renderer_discoverer_stop( libvlc_renderer_discoverer_t *p_lrd )
 {
     if( p_lrd->p_rd != NULL )
+    {
         vlc_rd_release( p_lrd->p_rd );
+        p_lrd->p_rd = NULL;
+    }
 
     for( int i = 0; i < p_lrd->i_items; ++i )
         vlc_renderer_item_release( p_lrd->pp_items[i] );

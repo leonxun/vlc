@@ -43,11 +43,10 @@
 #include <vlc_codec.h>
 #include <vlc_block_helper.h>
 #include <vlc_cpu.h>
-#include "../codec/cc.h"
+#include "cc.h"
+#include "synchro.h"
 
 #include <mpeg2.h>
-
-#include <vlc_codec_synchro.h>
 
 /*****************************************************************************
  * decoder_sys_t : libmpeg2 decoder descriptor
@@ -136,7 +135,7 @@ static int DpbDisplayPicture( decoder_t *, picture_t * );
  *****************************************************************************/
 vlc_module_begin ()
     set_description( N_("MPEG I/II video decoder (using libmpeg2)") )
-    set_capability( "decoder", 50 )
+    set_capability( "video decoder", 50 )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_VCODEC )
     set_callbacks( OpenDecoder, CloseDecoder )
@@ -243,7 +242,6 @@ static int OpenDecoder( vlc_object_t *p_this )
 
     p_dec->pf_decode = DecodeVideo;
     p_dec->pf_flush  = Reset;
-    p_dec->fmt_out.i_cat = VIDEO_ES;
     p_dec->fmt_out.i_codec = 0;
 
     return VLC_SUCCESS;
@@ -280,6 +278,17 @@ static picture_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             /* */
             mpeg2_custom_fbuf( p_sys->p_mpeg2dec, 1 );
 
+            if( p_sys->p_synchro )
+                decoder_SynchroRelease( p_sys->p_synchro );
+
+            if( p_sys->p_info->sequence->frame_period <= 0 )
+                p_sys->p_synchro = NULL;
+            else
+                p_sys->p_synchro =
+                decoder_SynchroInit( p_dec, (uint32_t)(UINT64_C(1001000000) *
+                                27 / p_sys->p_info->sequence->frame_period) );
+            p_sys->b_after_sequence_header = true;
+
             /* Set the first 2 reference frames */
             GetAR( p_dec );
             for( int i = 0; i < 2; i++ )
@@ -293,17 +302,6 @@ static picture_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 }
                 PutPicture( p_dec, p_picture );
             }
-
-            if( p_sys->p_synchro )
-                decoder_SynchroRelease( p_sys->p_synchro );
-
-            if( p_sys->p_info->sequence->frame_period <= 0 )
-                p_sys->p_synchro = NULL;
-            else
-                p_sys->p_synchro =
-                decoder_SynchroInit( p_dec, (uint32_t)(UINT64_C(1001000000) *
-                                27 / p_sys->p_info->sequence->frame_period) );
-            p_sys->b_after_sequence_header = true;
             break;
         }
 
@@ -709,7 +707,7 @@ static void SendCc( decoder_t *p_dec )
     decoder_sys_t   *p_sys = p_dec->p_sys;
     block_t         *p_cc = NULL;
 
-    if( p_sys->cc.i_data <= 0 )
+    if( !p_sys->cc.b_reorder && p_sys->cc.i_data <= 0 )
         return;
 
     p_cc = block_Alloc( p_sys->cc.i_data);
@@ -718,8 +716,12 @@ static void SendCc( decoder_t *p_dec )
         memcpy( p_cc->p_buffer, p_sys->cc.p_data, p_sys->cc.i_data );
         p_cc->i_dts =
         p_cc->i_pts = p_sys->cc.b_reorder ? p_sys->i_cc_pts : p_sys->i_cc_dts;
-        p_cc->i_flags = ( p_sys->cc.b_reorder  ? p_sys->i_cc_flags : BLOCK_FLAG_TYPE_P ) & ( BLOCK_FLAG_TYPE_I|BLOCK_FLAG_TYPE_P|BLOCK_FLAG_TYPE_B);
-        decoder_QueueCc( p_dec, p_cc, p_sys->cc.pb_present, 0 );
+        p_cc->i_flags = p_sys->i_cc_flags & BLOCK_FLAG_TYPE_MASK;
+        decoder_cc_desc_t desc;
+        desc.i_608_channels = p_sys->cc.i_608channels;
+        desc.i_708_channels = p_sys->cc.i_708channels;
+        desc.i_reorder_depth = p_sys->cc.b_reorder ? 0 : -1;
+        decoder_QueueCc( p_dec, p_cc, &desc );
     }
     cc_Flush( &p_sys->cc );
     return;

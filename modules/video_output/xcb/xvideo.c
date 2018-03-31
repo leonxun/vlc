@@ -53,7 +53,7 @@
 
 static int  Open (vlc_object_t *);
 static void Close (vlc_object_t *);
-static int EnumAdaptors (vlc_object_t *, const char *, int64_t **, char ***);
+static int EnumAdaptors(const char *, int64_t **, char ***);
 
 /*
  * Module descriptor
@@ -72,7 +72,7 @@ vlc_module_begin ()
     add_integer ("xvideo-format-id", 0,
                  FORMAT_TEXT, FORMAT_LONGTEXT, true)
     add_obsolete_bool ("xvideo-shm") /* removed in 2.0.0 */
-    add_shortcut ("xcb-xv", "xv", "xvideo", "xid")
+    add_shortcut ("xcb-xv", "xv", "xvideo")
 vlc_module_end ()
 
 #define MAX_PICTURES (128)
@@ -141,7 +141,7 @@ static vlc_fourcc_t ParseFormat (vlc_object_t *obj,
         switch (f->num_planes)
         {
           case 1:
-            switch (popcount (f->red_mask | f->green_mask | f->blue_mask))
+            switch (vlc_popcount (f->red_mask | f->green_mask | f->blue_mask))
             {
               case 24:
                 if (f->bpp == 32 && f->depth == 32)
@@ -566,7 +566,6 @@ static int Open (vlc_object_t *obj)
     vd->prepare = NULL;
     vd->display = Display;
     vd->control = Control;
-    vd->manage = NULL;
 
     return VLC_SUCCESS;
 
@@ -628,17 +627,14 @@ static void PoolAlloc (vout_display_t *vd, unsigned requested_count)
         for (unsigned i = 1; i < num_planes; i++)
             res.p[i].p_pixels = res.p[0].p_pixels + offsets[i];
 
-        if (p_sys->swap_uv)
-        {   /* YVU: swap U and V planes */
-            uint8_t *buf = res.p[2].p_pixels;
-            res.p[2].p_pixels = res.p[1].p_pixels;
-            res.p[1].p_pixels = buf;
-        }
-
         pic_array[count] = XCB_picture_NewFromResource (&vd->fmt, &res,
                                                         p_sys->conn);
         if (unlikely(pic_array[count] == NULL))
             break;
+
+        if (p_sys->swap_uv)
+            /* YVU: swap U and V planes */
+            picture_SwapUV( pic_array[count] );
     }
     xcb_flush (p_sys->conn);
 
@@ -724,22 +720,19 @@ static int Control (vout_display_t *vd, int query, va_list ap)
     case VOUT_DISPLAY_CHANGE_SOURCE_CROP:
     {
         const vout_display_cfg_t *cfg;
-        const video_format_t *source;
 
         if (query == VOUT_DISPLAY_CHANGE_SOURCE_ASPECT
          || query == VOUT_DISPLAY_CHANGE_SOURCE_CROP)
         {
-            source = va_arg(ap, const video_format_t *);
             cfg = vd->cfg;
         }
         else
         {
-            source = &vd->source;
             cfg = va_arg(ap, const vout_display_cfg_t *);
         }
 
         vout_display_place_t place;
-        vout_display_PlacePicture (&place, source, cfg, false);
+        vout_display_PlacePicture (&place, &vd->source, cfg, false);
         p_sys->width  = place.width;
         p_sys->height = place.height;
 
@@ -754,8 +747,6 @@ static int Control (vout_display_t *vd, int query, va_list ap)
         return VLC_SUCCESS;
     }
 
-    case VOUT_DISPLAY_HIDE_MOUSE:
-        return VLC_EGENERIC;
     case VOUT_DISPLAY_RESET_PICTURES:
         vlc_assert_unreachable();
     default:
@@ -764,11 +755,10 @@ static int Control (vout_display_t *vd, int query, va_list ap)
     }
 }
 
-static int EnumAdaptors (vlc_object_t *obj, const char *var,
-                         int64_t **vp, char ***tp)
+static int EnumAdaptors(const char *var, int64_t **vp, char ***tp)
 {
     /* Connect to X */
-    char *display = var_InheritString (obj, "x11-display");
+    char *display = config_GetPsz("x11-display");
     xcb_connection_t *conn;
     int snum;
 
@@ -842,6 +832,6 @@ static int EnumAdaptors (vlc_object_t *obj, const char *var,
         *(texts++) = strndup (xcb_xv_adaptor_info_name (a), a->name_size);
     }
     free (adaptors);
-    (void) obj; (void) var;
+    (void) var;
     return values - *vp;
 }

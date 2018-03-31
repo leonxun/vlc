@@ -58,7 +58,6 @@ struct demux_sys_t
 {
     es_out_id_t     *p_es;
 
-    int64_t         i_data_offset;
     unsigned int    i_data_size;
     unsigned int    i_block_frames;
     unsigned int    i_frame_size;
@@ -80,6 +79,8 @@ typedef struct xa_header_t
     uint16_t wBitsPerSample;
 } xa_header_t;
 
+#define HEADER_LENGTH 24
+
 static_assert(offsetof(xa_header_t, wBitsPerSample) == 22, "Bad padding");
 
 #define FRAME_LENGTH 28 /* samples per frame */
@@ -95,7 +96,8 @@ static int Open( vlc_object_t * p_this )
     /* XA file heuristic */
     if( vlc_stream_Peek( p_demux->s, &peek, 10 ) < 10 )
         return VLC_EGENERIC;
-    if( memcmp( peek, "XAI", 4 ) && memcmp( peek, "XAJ", 4 ) )
+    if( memcmp( peek, "XAI", 4 ) && memcmp( peek, "XAJ", 4 ) &&
+            memcmp( peek, "XA\0", 4 ) )
         return VLC_EGENERIC;
     if( GetWLE( peek + 8 ) != 1 ) /* format tag */
         return VLC_EGENERIC;
@@ -107,14 +109,14 @@ static int Open( vlc_object_t * p_this )
     /* read XA header*/
     xa_header_t xa;
 
-    if( vlc_stream_Read( p_demux->s, &xa, 24 ) < 24 )
+    if( vlc_stream_Read( p_demux->s, &xa, HEADER_LENGTH ) < HEADER_LENGTH )
     {
         free( p_sys );
         return VLC_EGENERIC;
     }
 
     es_format_t fmt;
-    es_format_Init( &fmt, AUDIO_ES, VLC_FOURCC('X','A','J',0) );
+    es_format_Init( &fmt, AUDIO_ES, VLC_CODEC_ADPCM_XA_EA );
 
     msg_Dbg( p_demux, "assuming EA ADPCM audio codec" );
     fmt.audio.i_rate = GetDWLE( &xa.nSamplesPerSec );
@@ -127,7 +129,6 @@ static int Open( vlc_object_t * p_this )
     fmt.i_bitrate = (fmt.audio.i_rate * fmt.audio.i_bytes_per_frame * 8)
                     / fmt.audio.i_frame_length;
 
-    p_sys->i_data_offset = vlc_stream_Tell( p_demux->s );
     /* FIXME: better computation */
     p_sys->i_data_size = xa.iSize * 15 / 56;
     /* How many frames per block (1:1 is too CPU intensive) */
@@ -167,13 +168,11 @@ static int Demux( demux_t *p_demux )
 {
     demux_sys_t *p_sys = p_demux->p_sys;
     block_t     *p_block;
-    int64_t     i_offset;
+    int64_t     i_offset = vlc_stream_Tell( p_demux->s );
     unsigned    i_frames = p_sys->i_block_frames;
 
-    i_offset = vlc_stream_Tell( p_demux->s );
-
     if( p_sys->i_data_size > 0 &&
-        i_offset >= p_sys->i_data_offset + p_sys->i_data_size )
+        (i_offset - HEADER_LENGTH) >= p_sys->i_data_size )
     {
         /* EOF */
         return 0;
@@ -188,7 +187,7 @@ static int Demux( demux_t *p_demux )
 
     i_frames = p_block->i_buffer / p_sys->i_frame_size;
     p_block->i_dts = p_block->i_pts = date_Get( &p_sys->pts );
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_block->i_pts );
+    es_out_SetPCR( p_demux->out, p_block->i_pts );
     es_out_Send( p_demux->out, p_sys->p_es, p_block );
 
     date_Increment( &p_sys->pts, i_frames * FRAME_LENGTH );
@@ -213,9 +212,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 {
     demux_sys_t *p_sys  = p_demux->p_sys;
 
-    return demux_vaControlHelper( p_demux->s, p_sys->i_data_offset,
-                                   p_sys->i_data_size ? p_sys->i_data_offset
-                                   + p_sys->i_data_size : -1,
-                                   p_sys->i_bitrate, p_sys->i_frame_size,
-                                   i_query, args );
+    return demux_vaControlHelper( p_demux->s, HEADER_LENGTH,
+        p_sys->i_data_size ? (int64_t)HEADER_LENGTH + p_sys->i_data_size : -1,
+                                  p_sys->i_bitrate, p_sys->i_frame_size,
+                                  i_query, args );
 }

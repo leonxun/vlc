@@ -1,34 +1,37 @@
-# breakpad
+# Breakpad
 
-BREAKPAD_HASH := bbebd8d5e7d61666c3a2dae82867bb7b5aeda639
-BREAKPAD_URL := https://chromium.googlesource.com/breakpad/breakpad/+archive/$(BREAKPAD_HASH).tar.gz
+# This is the VideoLAN fork of Breakpad, not Google Breakpad!
+BREAKPAD_VERSION := 0.1.3
+BREAKPAD_URL := http://download.videolan.org/pub/contrib/breakpad/breakpad-$(BREAKPAD_VERSION).tar.gz
 
 ifdef HAVE_MACOSX
 PKGS += breakpad
 endif
 
-$(TARBALLS)/breakpad-$(BREAKPAD_HASH).tar.gz:
+$(TARBALLS)/breakpad-$(BREAKPAD_VERSION).tar.gz:
 	$(call download_pkg,$(BREAKPAD_URL),breakpad)
 
-.sum-breakpad: breakpad-$(BREAKPAD_HASH).tar.gz
-	$(warning $@ not implemented)
-	touch $@
+.sum-breakpad: breakpad-$(BREAKPAD_VERSION).tar.gz
 
-breakpad: breakpad-$(BREAKPAD_HASH).tar.gz .sum-breakpad
-	rm -Rf $@ breakpad-$(BREAKPAD_HASH)
-	mkdir breakpad-$(BREAKPAD_HASH)
-	tar xvzf $(TARBALLS)/breakpad-$(BREAKPAD_HASH).tar.gz -C breakpad-$(BREAKPAD_HASH)
+breakpad: breakpad-$(BREAKPAD_VERSION).tar.gz .sum-breakpad
+	$(UNPACK)
 	$(MOVE)
 
 .breakpad: breakpad
 	# Framework
-	cd $</src/client/mac/ && xcodebuild $(XCODE_FLAGS) CLANG_CXX_LIBRARY=libc++ WARNING_CFLAGS=-Wno-error
+ifdef HAVE_MACOSX
+	cd $</src/client/mac/ && xcodebuild $(XCODE_FLAGS) CLANG_CXX_LIBRARY=libc++
 	cd $</src/client/mac/ && \
 		mkdir -p "$(PREFIX)/Frameworks" && \
 		rm -Rf $(PREFIX)/Frameworks/Breakpad.framework && \
 		cp -R build/Release/Breakpad.framework "$(PREFIX)/Frameworks"
 	# Tools
 	cd $</src/tools/mac/dump_syms && \
-		xcodebuild $(XCODE_FLAGS) CLANG_CXX_LIBRARY=libc++ WARNING_CFLAGS=-Wno-error && \
+		xcodebuild $(XCODE_FLAGS) CLANG_CXX_LIBRARY=libc++ && \
 		cp -R build/Release/dump_syms "$(PREFIX)/bin"
+else
+	$(RECONF)
+	cd $< && $(HOSTVARS) ./configure $(HOSTCONF) --disable-processor
+	cd $< && Configuration=Release $(MAKE) install
+endif
 	touch $@

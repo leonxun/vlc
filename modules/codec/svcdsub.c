@@ -48,10 +48,10 @@ vlc_module_begin ()
     set_shortname( N_("SVCD subtitles") )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_SCODEC )
-    set_capability( "decoder", 50 )
+    set_capability( "spu decoder", 50 )
     set_callbacks( DecoderOpen, DecoderClose )
 
-    add_obsolete_integer ( MODULE_STRING "-debug" )
+    add_obsolete_integer ( "svcdsub-debug" )
 
     add_submodule ()
     set_description( N_("Philips OGT (SVCD subtitle) packetizer") )
@@ -69,10 +69,9 @@ static void ParseHeader( decoder_t *, block_t * );
 static subpicture_t *DecodePacket( decoder_t *, block_t * );
 static void SVCDSubRenderImage( decoder_t *, block_t *, subpicture_region_t * );
 
-#define GETINT16(p) ( (p[0] <<  8) +   p[1] )  ; p +=2;
+#define GETINT16(p) GetWBE(p)  ; p +=2;
 
-#define GETINT32(p) ( (p[0] << 24) +  (p[1] << 16) +    \
-                      (p[2] <<  8) +  (p[3]) ) ; p += 4;
+#define GETINT32(p) GetDWBE(p) ; p += 4;
 
 typedef enum  {
   SUBTITLE_BLOCK_EMPTY    = 0,
@@ -130,7 +129,7 @@ static int DecoderOpen( vlc_object_t *p_this )
     p_sys->i_state = SUBTITLE_BLOCK_EMPTY;
     p_sys->p_spu   = NULL;
 
-    es_format_Init( &p_dec->fmt_out, SPU_ES, VLC_CODEC_OGT );
+    p_dec->fmt_out.i_codec = VLC_CODEC_OGT;
 
     p_dec->pf_decode    = Decode;
     p_dec->pf_packetize = Packetize;
@@ -331,7 +330,7 @@ static block_t *Reassemble( decoder_t *p_dec, block_t *p_block )
 
 /******************************************************************************
   The format is roughly as follows (everything is big-endian):
- 
+
    size     description
    -------------------------------------------
    byte     subtitle channel (0..7) in bits 0-3
@@ -363,12 +362,13 @@ static void ParseHeader( decoder_t *p_dec, block_t *p_block )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
     uint8_t *p = p_block->p_buffer;
-    uint8_t i_options, i_options2, i_cmd, i_cmd_arg;
+    uint8_t i_options, i_cmd;
     int i;
 
     p_sys->i_spu_size = GETINT16(p);
     i_options  = *p++;
-    i_options2 = *p++;
+    // Skip over unused value
+    p++;
 
     if( i_options & 0x08 ) { p_sys->i_duration = GETINT32(p); }
     else p_sys->i_duration = 0; /* Ephemer subtitle */
@@ -389,7 +389,7 @@ static void ParseHeader( decoder_t *p_dec, block_t *p_block )
 
     i_cmd = *p++;
     /* We do not really know this, FIXME */
-    if( i_cmd ) {i_cmd_arg = GETINT32(p);}
+    if( i_cmd ) { p += 4; }
 
     /* Actually, this is measured against a different origin, so we have to
      * adjust it */

@@ -57,7 +57,7 @@ static void Close  ( vlc_object_t * );
 #define REVERB_LEVEL_LONGTEXT N_( "Reverberation level (from 0 " \
                 "to 100, default value is 0)." )
 #define REVERB_DELAY_LONGTEXT N_("Reverberation delay, in ms." \
-                " Usual values are from to 40 to 200ms." )
+                " Usual values are from 40 to 200ms." )
 #define MEGABASS_LONGTEXT N_( "Enable megabass mode" )
 #define MEGABASS_LEVEL_LONGTEXT N_("Megabass mode level (from 0 to 100, " \
                 "default value is 0)." )
@@ -143,7 +143,7 @@ static int Open( vlc_object_t *p_this )
     /* We accept file based on extension match */
     if( !p_demux->obj.force )
     {
-        const char *psz_ext = p_demux->psz_file ? strrchr( p_demux->psz_file, '.' )
+        const char *psz_ext = p_demux->psz_filepath ? strrchr( p_demux->psz_filepath, '.' )
                                                 : NULL;
         if( psz_ext )
             psz_ext++;
@@ -215,8 +215,6 @@ static int Open( vlc_object_t *p_this )
     if( !p_sys->f )
     {
         msg_Err( p_demux, "failed to understand the file" );
-        /* we try to seek to recover for other plugin */
-        vlc_stream_Seek( p_demux->s, 0 );
         free( p_sys->p_data );
         free( p_sys );
         return VLC_EGENERIC;
@@ -284,7 +282,7 @@ static int Demux( demux_t *p_demux )
     p_frame->i_pts = VLC_TS_0 + date_Get( &p_sys->pts );
 
     /* Set PCR */
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_frame->i_pts );
+    es_out_SetPCR( p_demux->out, p_frame->i_pts );
 
     /* Send data */
     es_out_Send( p_demux->out, p_sys->es, p_frame );
@@ -430,8 +428,17 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
     }
 
     case DEMUX_GET_FPS: /* meaningless */
+        return VLC_EGENERIC;
+
+    case DEMUX_CAN_PAUSE:
+    case DEMUX_CAN_CONTROL_PACE:
+    case DEMUX_GET_PTS_DELAY:
+    case DEMUX_SET_PAUSE_STATE:
+        return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
+
     default:
         return VLC_EGENERIC;
+
     }
 }
 
@@ -576,7 +583,7 @@ static int Validate( demux_t *p_demux, const char *psz_ext )
             const uint8_t *p_sample = &p_peek[20 + i*30];
 
             /* Check correct null padding */
-            const uint8_t *p = memchr( &p_sample[0], '\0', 22 );
+            p = memchr( &p_sample[0], '\0', 22 );
             if( p )
             {
                 for( ; p < &p_sample[22]; p++ )

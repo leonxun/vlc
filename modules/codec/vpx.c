@@ -64,7 +64,7 @@ static block_t *Encode(encoder_t *p_enc, picture_t *p_pict);
 vlc_module_begin ()
     set_shortname("vpx")
     set_description(N_("WebM video decoder"))
-    set_capability("decoder", 100)
+    set_capability("video decoder", 60)
     set_callbacks(OpenDecoder, CloseDecoder)
     set_category(CAT_INPUT)
     set_subcategory(SUBCAT_INPUT_VCODEC)
@@ -247,6 +247,7 @@ static int Decode(decoder_t *dec, block_t *block)
     }
 
     dec->fmt_out.video.projection_mode = dec->fmt_in.video.projection_mode;
+    dec->fmt_out.video.multiview_mode = dec->fmt_in.video.multiview_mode;
     dec->fmt_out.video.pose = dec->fmt_in.video.pose;
 
     if (decoder_UpdateVideoFormat(dec))
@@ -288,6 +289,7 @@ static int OpenDecoder(vlc_object_t *p_this)
     switch (dec->fmt_in.i_codec)
     {
 #ifdef ENABLE_VP8_DECODER
+    case VLC_CODEC_WEBP:
     case VLC_CODEC_VP8:
         iface = &vpx_codec_vp8_dx_algo;
         vp_version = 8;
@@ -323,7 +325,6 @@ static int OpenDecoder(vlc_object_t *p_this)
 
     dec->pf_decode = Decode;
 
-    dec->fmt_out.i_cat = VIDEO_ES;
     dec->fmt_out.video.i_width = dec->fmt_in.video.i_width;
     dec->fmt_out.video.i_height = dec->fmt_in.video.i_height;
 
@@ -365,6 +366,7 @@ static void CloseDecoder(vlc_object_t *p_this)
 struct encoder_sys_t
 {
     struct vpx_codec_ctx ctx;
+    unsigned long quality;
 };
 
 /*****************************************************************************
@@ -423,6 +425,19 @@ static int OpenEncoder(vlc_object_t *p_this)
     p_enc->fmt_in.i_codec = VLC_CODEC_I420;
     config_ChainParse(p_enc, ENC_CFG_PREFIX, ppsz_sout_options, p_enc->p_cfg);
 
+    /* Deadline (in ms) to spend in encoder */
+    switch (var_GetInteger(p_enc, ENC_CFG_PREFIX "quality-mode")) {
+        case 1:
+            p_sys->quality = VPX_DL_REALTIME;
+            break;
+        case 2:
+            p_sys->quality = VPX_DL_BEST_QUALITY;
+            break;
+        default:
+            p_sys->quality = VPX_DL_GOOD_QUALITY;
+            break;
+    }
+
     return VLC_SUCCESS;
 }
 
@@ -461,23 +476,12 @@ static block_t *Encode(encoder_t *p_enc, picture_t *p_pict)
     }
 
     int flags = 0;
-    /* Deadline (in ms) to spend in encoder */
-    int quality = VPX_DL_GOOD_QUALITY;
-    switch (var_GetInteger(p_enc, ENC_CFG_PREFIX "quality-mode")) {
-        case 1:
-            quality = VPX_DL_REALTIME;
-            break;
-        case 2:
-            quality = VPX_DL_BEST_QUALITY;
-            break;
-        default:
-            break;
-    }
 
     vpx_codec_err_t res = vpx_codec_encode(ctx, &img, p_pict->date, 1,
-     flags, quality);
+     flags, p_sys->quality);
     if (res != VPX_CODEC_OK) {
         VPX_ERR(p_enc, ctx, "Failed to encode frame");
+        vpx_img_free(&img);
         return NULL;
     }
 

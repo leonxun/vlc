@@ -79,7 +79,7 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_INPUT_ACCESS )
 
     add_shortcut( "oss" )
-    set_capability( "access_demux", 10 )
+    set_capability( "access_demux", 0 )
     set_callbacks( DemuxOpen, DemuxClose )
 
     add_bool( CFG_PREFIX "stereo", true, STEREO_TEXT, STEREO_LONGTEXT,
@@ -126,14 +126,16 @@ struct demux_sys_t
 
 static int FindMainDevice( demux_t *p_demux )
 {
-    msg_Dbg( p_demux, "opening device '%s'", p_demux->p_sys->psz_device );
-    if( ProbeAudioDevOss( p_demux, p_demux->p_sys->psz_device ) )
+    demux_sys_t *p_sys = p_demux->p_sys;
+
+    msg_Dbg( p_demux, "opening device '%s'", p_sys->psz_device );
+    if( ProbeAudioDevOss( p_demux, p_sys->psz_device ) )
     {
-        msg_Dbg( p_demux, "'%s' is an audio device", p_demux->p_sys->psz_device );
-        p_demux->p_sys->i_fd = OpenAudioDev( p_demux );
+        msg_Dbg( p_demux, "'%s' is an audio device", p_sys->psz_device );
+        p_sys->i_fd = OpenAudioDev( p_demux );
     }
 
-    if( p_demux->p_sys->i_fd < 0 )
+    if( p_sys->i_fd < 0 )
         return VLC_EGENERIC;
     return VLC_SUCCESS;
 }
@@ -150,17 +152,14 @@ static int DemuxOpen( vlc_object_t *p_this )
     demux_t     *p_demux = (demux_t*)p_this;
     demux_sys_t *p_sys;
 
-    /* Only when selected */
-    if( *p_demux->psz_access == '\0' ) return VLC_EGENERIC;
+    if (p_demux->out == NULL)
+        return VLC_EGENERIC;
 
     /* Set up p_demux */
     p_demux->pf_control = DemuxControl;
     p_demux->pf_demux = Demux;
-    p_demux->info.i_update = 0;
-    p_demux->info.i_title = 0;
-    p_demux->info.i_seekpoint = 0;
 
-    p_demux->p_sys = p_sys = calloc( 1, sizeof( demux_sys_t ) );
+    p_demux->p_sys = p_sys = vlc_obj_calloc( p_this, 1, sizeof( demux_sys_t ) );
     if( p_sys == NULL ) return VLC_ENOMEM;
 
     p_sys->i_sample_rate = var_InheritInteger( p_demux, CFG_PREFIX "samplerate" );
@@ -196,7 +195,6 @@ static void DemuxClose( vlc_object_t *p_this )
         vlc_close( p_sys->i_fd );
 
     if( p_sys->p_block ) block_Release( p_sys->p_block );
-    free( p_sys );
 }
 
 /*****************************************************************************
@@ -272,7 +270,7 @@ static int Demux( demux_t *p_demux )
             {
                 p_block = GrabAudio( p_demux );
                 if( p_block )
-                    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_block->i_pts );
+                    es_out_SetPCR( p_demux->out, p_block->i_pts );
             }
         }
     } while( p_block && p_sys->i_next_demux_date > 0 &&
@@ -333,10 +331,11 @@ static block_t* GrabAudio( demux_t *p_demux )
  *****************************************************************************/
 static int OpenAudioDevOss( demux_t *p_demux )
 {
+    demux_sys_t *p_sys = (demux_sys_t *)p_demux->p_sys;
     int i_fd;
     int i_format;
 
-    i_fd = vlc_open( p_demux->p_sys->psz_device, O_RDONLY | O_NONBLOCK );
+    i_fd = vlc_open( p_sys->psz_device, O_RDONLY | O_NONBLOCK );
 
     if( i_fd < 0 )
     {
@@ -355,23 +354,21 @@ static int OpenAudioDevOss( demux_t *p_demux )
         goto adev_fail;
     }
 
-    if( ioctl( i_fd, SNDCTL_DSP_STEREO,
-               &p_demux->p_sys->b_stereo ) < 0 )
+    if( ioctl( i_fd, SNDCTL_DSP_STEREO, &p_sys->b_stereo ) < 0 )
     {
         msg_Err( p_demux, "cannot set audio channels count (%s)",
                  vlc_strerror_c(errno) );
         goto adev_fail;
     }
 
-    if( ioctl( i_fd, SNDCTL_DSP_SPEED,
-               &p_demux->p_sys->i_sample_rate ) < 0 )
+    if( ioctl( i_fd, SNDCTL_DSP_SPEED, &p_sys->i_sample_rate ) < 0 )
     {
         msg_Err( p_demux, "cannot set audio sample rate (%s)",
                  vlc_strerror_c(errno) );
         goto adev_fail;
     }
 
-    p_demux->p_sys->i_max_frame_size = 6 * 1024;
+    p_sys->i_max_frame_size = 6 * 1024;
 
     return i_fd;
 

@@ -43,8 +43,8 @@ static int  Open( vlc_object_t * );
 static void Close( vlc_object_t * );
 static int Decode( decoder_t *, block_t * );
 
-#define IGNORE_RUBY_TEXT N_("Ignore ruby(furigana)")
-#define IGNORE_RUBY_LONGTEXT N_("Ignore ruby(furigana) in the subtitle.")
+#define IGNORE_RUBY_TEXT N_("Ignore ruby (furigana)")
+#define IGNORE_RUBY_LONGTEXT N_("Ignore ruby (furigana) in the subtitle.")
 #define USE_CORETEXT_TEXT N_("Use Core Text renderer")
 #define USE_CORETEXT_LONGTEXT N_("Use Core Text renderer in the subtitle.")
 
@@ -52,7 +52,7 @@ vlc_module_begin ()
 #   define ARIBSUB_CFG_PREFIX "aribsub-"
     set_description( N_("ARIB subtitles decoder") )
     set_shortname( N_("ARIB subtitles") )
-    set_capability( "decoder", 50 )
+    set_capability( "spu decoder", 50 )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_SCODEC )
     set_callbacks( Open, Close )
@@ -118,7 +118,6 @@ static int Open( vlc_object_t *p_this )
 
     p_dec->p_sys = p_sys;
     p_dec->pf_decode = Decode;
-    p_dec->fmt_out.i_cat = SPU_ES;
     p_dec->fmt_out.i_codec = 0;
 
     p_sys->b_a_profile = ( p_dec->fmt_in.i_codec == VLC_CODEC_ARIB_A );
@@ -198,7 +197,7 @@ static void messages_callback_handler( void *p_opaque, const char *psz_message )
 
 static char* get_arib_base_dir()
 {
-    char *psz_data_dir = config_GetUserDir( VLC_DATA_DIR );
+    char *psz_data_dir = config_GetUserDir( VLC_USERDATA_DIR );
     if( psz_data_dir == NULL )
     {
         return NULL;

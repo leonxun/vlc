@@ -211,7 +211,7 @@ static int Demux( demux_t *p_demux )
 
     p_sys->i_currentframe++;
 
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_data->i_dts );
+    es_out_SetPCR( p_demux->out, p_data->i_dts );
     if( p_sys->p_es )
         es_out_Send( p_demux->out, p_sys->p_es, p_data );
 
@@ -256,7 +256,8 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
                 {
                     tmp += p_sys->pi_seektable[i];
                 }
-                vlc_stream_Seek( p_demux->s, tmp+p_sys->i_start );
+                if( vlc_stream_Seek( p_demux->s, tmp+p_sys->i_start ) )
+                    return VLC_EGENERIC;
                 p_sys->i_currentframe = i;
                 return VLC_SUCCESS;
             }
@@ -271,6 +272,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             pi64 = va_arg( args, int64_t * );
             *pi64 = INT64_C(1000000) * p_sys->i_currentframe * TTA_FRAMETIME;
             return VLC_SUCCESS;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, 0, p_sys->i_datalength,
+                                          0, p_sys->i_framelength, i_query, args );
 
         default:
             return VLC_EGENERIC;

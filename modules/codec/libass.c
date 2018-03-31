@@ -42,6 +42,10 @@
 
 #include <ass/ass.h>
 
+#if LIBASS_VERSION < 0x01300000
+# define ASS_FONTPROVIDER_AUTODETECT 1
+#endif
+
 #if defined(_WIN32)
 #   include <vlc_charset.h>
 #endif
@@ -55,7 +59,7 @@ static void Destroy( vlc_object_t * );
 vlc_module_begin ()
     set_shortname( N_("Subtitles (advanced)"))
     set_description( N_("Subtitle renderers using libass") )
-    set_capability( "decoder", 100 )
+    set_capability( "spu decoder", 100 )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_SCODEC )
     set_callbacks( Create, Destroy )
@@ -212,8 +216,24 @@ static int Create( vlc_object_t *p_this )
     ass_set_line_spacing( p_renderer, 0.0 );
 
 #if defined( __ANDROID__ )
-    const char *psz_font = "/system/fonts/DroidSans-Bold.ttf";
-    const char *psz_family = "Droid Sans Bold";
+    const char *psz_font, *psz_family;
+    const char *psz_font_droid = "/system/fonts/DroidSans-Bold.ttf";
+    const char *psz_family_droid = "Droid Sans Bold";
+    const char *psz_font_noto = "/system/fonts/NotoSansCJK-Regular.ttc";
+    const char *psz_family_noto = "Noto Sans";
+
+    // Workaround for Android 5.0+, since libass doesn't parse the XML yet
+    if( access( psz_font_noto, R_OK ) != -1 )
+    {
+        psz_font = psz_font_noto;
+        psz_family = psz_family_noto;
+    }
+    else
+    {
+        psz_font = psz_font_droid;
+        psz_family = psz_family_droid;
+    }
+
 #elif defined( __APPLE__ )
     const char *psz_font = NULL; /* We don't ship a default font with VLC */
     const char *psz_family = "Helvetica Neue"; /* Use HN if we can't find anything more suitable - Arial is not on all Apple platforms */
@@ -230,13 +250,13 @@ static int Create( vlc_object_t *p_this )
                                     _( "Please wait while your font cache is rebuilt.\n"
                                     "This should take less than a minute." ) );
 #endif
-    ass_set_fonts( p_renderer, psz_font, psz_family, 1, NULL, 1 );  // setup default font/family
+    ass_set_fonts( p_renderer, psz_font, psz_family, ASS_FONTPROVIDER_AUTODETECT, NULL, 1 );  // setup default font/family
 #if defined(_WIN32)
     if( p_dialog_id != 0 )
         vlc_dialog_release( p_dec, p_dialog_id );
 #endif
 #else
-    ass_set_fonts( p_renderer, psz_font, psz_family, 1, NULL, 1 );
+    ass_set_fonts( p_renderer, psz_font, psz_family, ASS_FONTPROVIDER_AUTODETECT, NULL, 0 );
 #endif
 
     /* Anything else than NONE will break smooth img updating.
@@ -252,7 +272,6 @@ static int Create( vlc_object_t *p_this )
     }
     ass_process_codec_private( p_track, p_dec->fmt_in.p_extra, p_dec->fmt_in.i_extra );
 
-    p_dec->fmt_out.i_cat = SPU_ES;
     p_dec->fmt_out.i_codec = VLC_CODEC_RGBA;
 
     return VLC_SUCCESS;
@@ -622,9 +641,9 @@ static int BuildRegions( rectangle_t *p_region, int i_max_region, ASS_Image *p_i
             {
                 for( int j = i+1; j < i_region; j++ )
                 {
-                    rectangle_t n = region[i];
-                    r_add( &n, &region[j] );
-                    int ds = r_surface( &n ) - r_surface( &region[i] ) - r_surface( &region[j] );
+                    rectangle_t rect = region[i];
+                    r_add( &rect, &region[j] );
+                    int ds = r_surface( &rect ) - r_surface( &region[i] ) - r_surface( &region[j] );
 
                     if( ds < i_best_ds )
                     {

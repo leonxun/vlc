@@ -29,11 +29,11 @@
 #endif
 
 #include <vlc_common.h>
-#include <vlc_atomic.h>
 
 #include "libvlc.h"
 #include <signal.h>
 #include <errno.h>
+#include <stdatomic.h>
 #include <time.h>
 #include <assert.h>
 
@@ -141,6 +141,12 @@ void vlc_mutex_unlock (vlc_mutex_t *p_mutex)
     VLC_THREAD_ASSERT ("unlocking mutex");
 }
 
+void vlc_once(vlc_once_t *once, void (*cb)(void))
+{
+    int val = pthread_once(once, cb);
+    VLC_THREAD_ASSERT("initializing once");
+}
+
 struct vlc_thread
 {
     pthread_t      thread;
@@ -159,7 +165,7 @@ struct vlc_thread
     bool killable;
 };
 
-static __thread struct vlc_thread *thread = NULL;
+static thread_local struct vlc_thread *thread = NULL;
 
 vlc_thread_t vlc_thread_self (void)
 {

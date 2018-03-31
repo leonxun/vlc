@@ -48,7 +48,7 @@ static void DecoderClose  ( vlc_object_t * );
 
 vlc_module_begin ()
     set_description( N_("CVD subtitle decoder") )
-    set_capability( "decoder", 50 )
+    set_capability( "spu decoder", 50 )
     set_callbacks( DecoderOpen, DecoderClose )
 
     add_submodule ()
@@ -125,7 +125,6 @@ static int DecoderOpen( vlc_object_t *p_this )
     p_dec->pf_decode     = Decode;
     p_dec->pf_packetize  = Packetize;
 
-    p_dec->fmt_out.i_cat = SPU_ES;
     p_dec->fmt_out.i_codec = VLC_CODEC_YUVP;
 
     return VLC_SUCCESS;
@@ -140,6 +139,7 @@ static int PacketizerOpen( vlc_object_t *p_this )
 
     if( DecoderOpen( p_this ) != VLC_SUCCESS ) return VLC_EGENERIC;
 
+    p_dec->fmt_out.i_codec = VLC_CODEC_CVD;
     p_dec->p_sys->b_packetizer = true;
 
     return VLC_SUCCESS;
@@ -178,6 +178,7 @@ static int Decode( decoder_t *p_dec, block_t *p_block )
 
     /* Parse and decode */
     subpicture_t *p_spu = DecodePacket( p_dec, p_data );
+    block_Release( p_data );
     if( p_spu != NULL )
         decoder_QueueSub( p_dec, p_spu );
     return VLCDEC_SUCCESS;
@@ -530,7 +531,6 @@ static subpicture_t *DecodePacket( decoder_t *p_dec, block_t *p_data )
     }
 
     p_region = subpicture_region_New( &fmt );
-    video_format_Clean( &fmt );
     if( !p_region )
     {
         msg_Err( p_dec, "cannot allocate SPU region" );

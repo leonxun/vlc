@@ -33,7 +33,6 @@
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_demux.h>
-#include <assert.h>
 
 /*****************************************************************************
  * Module descriptor
@@ -150,10 +149,10 @@ static int Open( vlc_object_t * p_this )
     if( !p_demux->obj.force )
     {
         /* guess preset based on file extension */
-        if( !p_demux->psz_file )
+        if( !p_demux->psz_filepath )
             return VLC_EGENERIC;
 
-        const char *psz_ext = strrchr( p_demux->psz_file, '.' );
+        const char *psz_ext = strrchr( p_demux->psz_filepath, '.' );
         if( !psz_ext )
             return VLC_EGENERIC;
         psz_ext++;
@@ -359,8 +358,6 @@ valid:
     return VLC_SUCCESS;
 
 error:
-    /* workaround, but y4m uses vlc_stream_ReadLine */
-    vlc_stream_Seek( p_demux->s, 0 );
     free( p_sys );
     return VLC_EGENERIC;
 }
@@ -387,7 +384,7 @@ static int Demux( demux_t *p_demux )
     mtime_t i_pcr = date_Get( &p_sys->pcr );
 
     /* Call the pace control */
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + i_pcr );
+    es_out_SetPCR( p_demux->out, VLC_TS_0 + i_pcr );
 
     if( p_sys->b_y4m )
     {

@@ -212,6 +212,9 @@ static int DemuxOpen( vlc_object_t *p_this )
     demux_sys_t *p_sys;
     char        *psz_parser;
 
+    if (p_demux->out == NULL)
+        return VLC_EGENERIC;
+
     /* Fill p_demux field */
     p_demux->pf_demux = DemuxDemux;
     p_demux->pf_control = DemuxControl;
@@ -223,21 +226,13 @@ static int DemuxOpen( vlc_object_t *p_this )
     p_sys->i_last_state_change = mdate();
 
     /* SDI AR */
-    char *psz_ar = var_InheritString( p_demux, "linsys-sdi-aspect-ratio" );
-    if ( psz_ar != NULL )
-    {
-        psz_parser = strchr( psz_ar, ':' );
-        if ( psz_parser )
-        {
-            *psz_parser++ = '\0';
-            p_sys->i_forced_aspect = p_sys->i_aspect =
-                 strtol( psz_ar, NULL, 0 ) * VOUT_ASPECT_FACTOR
-                 / strtol( psz_parser, NULL, 0 );
-        }
-        else
-            p_sys->i_forced_aspect = 0;
-        free( psz_ar );
-    }
+    unsigned int i_num, i_den;
+    if ( !var_InheritURational( p_demux, &i_num, &i_den,
+                               "linsys-hdsdi-aspect-ratio" ) && i_den != 0 )
+        p_sys->i_forced_aspect = p_sys->i_aspect =
+                i_num * VOUT_ASPECT_FACTOR / i_den;
+    else
+        p_sys->i_forced_aspect = 0;
 
     /* */
     p_sys->i_id_video = var_InheritInteger( p_demux, "linsys-sdi-id-video" );
@@ -729,15 +724,9 @@ static void DecodeWSS( demux_t *p_demux )
     {
         unsigned int i_old_aspect = p_sys->i_aspect;
         uint8_t *p = p_sliced[0].data;
-        int i_aspect, i_parity;
+        int i_aspect = p[0] & 7;
 
-        i_aspect = p[0] & 15;
-        i_parity = i_aspect;
-        i_parity ^= i_parity >> 2;
-        i_parity ^= i_parity >> 1;
-        i_aspect &= 7;
-
-        if ( !(i_parity & 1) )
+        if ( !parity(p[0] & 15) )
             msg_Warn( p_demux, "WSS parity error" );
         else if ( i_aspect == 7 )
             p_sys->i_aspect = 16 * VOUT_ASPECT_FACTOR / 9;
@@ -780,7 +769,7 @@ static int InitTelx( demux_t *p_demux )
         return VLC_EGENERIC;
     }
 
-    p_sys->p_telx_buffer = malloc( p_sys->i_telx_count * p_sys->i_width * 4 );
+    p_sys->p_telx_buffer = vlc_alloc( p_sys->i_telx_count * p_sys->i_width, 4 );
     if( !p_sys->p_telx_buffer )
     {
         vbi_raw_decoder_destroy ( &p_sys->rd_telx );
@@ -847,7 +836,6 @@ static int InitAudio( demux_t *p_demux, sdi_audio_t *p_audio )
     es_format_Init( &fmt, AUDIO_ES, VLC_CODEC_S16L );
     fmt.i_id = p_audio->i_id;
     fmt.audio.i_channels          = 2;
-    fmt.audio.i_original_channels =
     fmt.audio.i_physical_channels = AOUT_CHANS_STEREO;
     fmt.audio.i_rate              = p_audio->i_rate;
     fmt.audio.i_bitspersample     = 16;
@@ -862,7 +850,7 @@ static int InitAudio( demux_t *p_demux, sdi_audio_t *p_audio )
     p_audio->i_max_samples        = (float)p_audio->i_nb_samples *
                                     (1.f + SAMPLERATE_TOLERANCE);
 
-    p_audio->p_buffer             = malloc( p_audio->i_max_samples * sizeof(int16_t) * 2 );
+    p_audio->p_buffer             = vlc_alloc( p_audio->i_max_samples, sizeof(int16_t) * 2 );
     p_audio->i_left_samples       = p_audio->i_right_samples = 0;
     p_audio->i_block_number       = 0;
 
@@ -994,7 +982,7 @@ static int DecodeFrame( demux_t *p_demux )
 
     DecodeVideo( p_demux );
 
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_sys->i_next_date );
+    es_out_SetPCR( p_demux->out, p_sys->i_next_date );
     p_sys->i_next_date += p_sys->i_incr;
 
     if( NewFrame( p_demux ) != VLC_SUCCESS )
@@ -1738,7 +1726,7 @@ static int InitCapture( demux_t *p_demux )
 
     i_bufmemsize = ((p_sys->i_buffer_size + i_page_size - 1) / i_page_size)
                      * i_page_size;
-    p_sys->pp_buffers = malloc( p_sys->i_buffers * sizeof(uint8_t *) );
+    p_sys->pp_buffers = vlc_alloc( p_sys->i_buffers, sizeof(uint8_t *) );
     if( !p_sys->pp_buffers )
         return VLC_ENOMEM;
 

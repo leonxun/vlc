@@ -32,18 +32,18 @@
 #include <vlc_subpicture.h>
 
 /**
- * \defgroup codec Codec
- * Decoders and encoders
- * @{
- * \file
- * Decoder and encoder modules interface
- *
  * \defgroup decoder Decoder
+ * \ingroup input
  * Audio, video and text decoders
  * @{
+ *
+ * \file
+ * Decoder and encoder modules interface
  */
 
 typedef struct decoder_owner_sys_t decoder_owner_sys_t;
+
+typedef struct decoder_cc_desc_t decoder_cc_desc_t;
 
 /*
  * BIG FAT WARNING : the code relies in the first 4 members of filter_t
@@ -52,7 +52,7 @@ typedef struct decoder_owner_sys_t decoder_owner_sys_t;
  */
 struct decoder_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     /* Module properties */
     module_t *          p_module;
@@ -127,10 +127,10 @@ struct decoder_t
     /* Closed Caption (CEA 608/708) extraction.
      * If set, it *may* be called after pf_packetize returned data. It should
      * return CC for the pictures returned by the last pf_packetize call only,
-     * pb_present will be used to known which cc channel are present (but
+     * channel bitmaps will be used to known which cc channel are present (but
      * globaly, not necessary for the current packet. Video decoders should use
      * the decoder_QueueCc() function to pass closed captions. */
-    block_t *           ( * pf_get_cc )      ( decoder_t *, bool pb_present[4], int * );
+    block_t *           ( * pf_get_cc )      ( decoder_t *, decoder_cc_desc_t * );
 
     /* Meta data at codec level
      *  The decoder owner set it back to NULL once it has retreived what it needs.
@@ -178,7 +178,7 @@ struct decoder_t
     /* XXX use decoder_QueueAudio */
     int             (*pf_queue_audio)( decoder_t *, block_t * );
     /* XXX use decoder_QueueCC */
-    int             (*pf_queue_cc)( decoder_t *, block_t *, bool p_cc_present[4], int );
+    int             (*pf_queue_cc)( decoder_t *, block_t *, const decoder_cc_desc_t * );
     /* XXX use decoder_QueueSub */
     int             (*pf_queue_sub)( decoder_t *, subpicture_t *);
     void             *p_queue_ctx;
@@ -187,19 +187,29 @@ struct decoder_t
     decoder_owner_sys_t *p_owner;
 };
 
+/* struct for packetizer get_cc polling/decoder queue_cc
+ * until we have a proper metadata way */
+struct decoder_cc_desc_t
+{
+    uint8_t i_608_channels;  /* 608 channels bitmap */
+    uint64_t i_708_channels; /* 708 */
+    int i_reorder_depth;     /* reorder depth, -1 for no reorder, 0 for old P/B flag based */
+};
+
 /**
  * @}
  */
 
 /**
  * \defgroup encoder Encoder
+ * \ingroup sout
  * Audio, video and text encoders
  * @{
  */
 
 struct encoder_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     /* Module properties */
     module_t *          p_module;
@@ -247,9 +257,11 @@ struct encoder_t
  *
  * @return 0 if the video output was set up successfully, -1 otherwise.
  */
+VLC_USED
 static inline int decoder_UpdateVideoFormat( decoder_t *dec )
 {
-    if( dec->pf_vout_format_update != NULL )
+    assert( dec->fmt_in.i_cat == VIDEO_ES );
+    if( dec->fmt_in.i_cat == VIDEO_ES && dec->pf_vout_format_update != NULL )
         return dec->pf_vout_format_update( dec );
     else
         return -1;
@@ -309,21 +321,18 @@ static inline int decoder_QueueVideo( decoder_t *dec, picture_t *p_pic )
  *
  * \param dec the decoder object
  * \param p_cc the closed-caption to queue
- * \param p_cc_present array-of-bool where each entry indicates whether the
- *                     given channel is present or not
- * \param i_depth the closed-caption to queue reorder depth, or simply 0
- *                     if using the old mpgv block flag tagging
+ * \param p_desc decoder_cc_desc_t description structure
  * \return 0 if queued, -1 on error
  */
 static inline int decoder_QueueCc( decoder_t *dec, block_t *p_cc,
-                                   bool p_cc_present[4], int i_depth )
+                                   const decoder_cc_desc_t *p_desc )
 {
     if( dec->pf_queue_cc == NULL )
     {
         block_Release( p_cc );
         return -1;
     }
-    return dec->pf_queue_cc( dec, p_cc, p_cc_present, i_depth );
+    return dec->pf_queue_cc( dec, p_cc, p_desc );
 }
 
 /**
@@ -363,9 +372,11 @@ static inline int decoder_QueueSub( decoder_t *dec, subpicture_t *p_spu )
  * format (fmt_out.audio). If there is currently no audio output or if the
  * audio output format has changed, a new audio output will be set up.
  * @return 0 if the audio output is working, -1 if not. */
+VLC_USED
 static inline int decoder_UpdateAudioFormat( decoder_t *dec )
 {
-    if( dec->pf_aout_format_update != NULL )
+    assert(dec->fmt_in.i_cat == AUDIO_ES);
+    if( dec->fmt_in.i_cat == AUDIO_ES && dec->pf_aout_format_update != NULL )
         return dec->pf_aout_format_update( dec );
     else
         return -1;
@@ -376,7 +387,7 @@ static inline int decoder_UpdateAudioFormat( decoder_t *dec )
  * output buffer. It must be released with block_Release() or returned it to
  * the caller as a decoder_QueueAudio parameter.
  */
-VLC_API block_t * decoder_NewAudioBuffer( decoder_t *, int i_size ) VLC_USED;
+VLC_API block_t * decoder_NewAudioBuffer( decoder_t *, int i_nb_samples ) VLC_USED;
 
 /**
  * This function will return a new subpicture usable by a decoder as an output

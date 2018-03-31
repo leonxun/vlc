@@ -96,6 +96,9 @@ static void inputItemMetaChanged( const vlc_event_t *p_event,
  **/
 int Open_Extension( vlc_object_t *p_this )
 {
+    if( lua_Disabled( p_this ) )
+        return VLC_EGENERIC;
+
     msg_Dbg( p_this, "Opening Lua Extension module" );
 
     extensions_manager_t *p_mgr = ( extensions_manager_t* ) p_this;
@@ -675,7 +678,14 @@ int lua_ExtensionDeactivate( extensions_manager_t *p_mgr, extension_t *p_ext )
         p_ext->p_sys->p_input = NULL;
     }
 
-    return lua_ExecuteFunction( p_mgr, p_ext, "deactivate", LUA_END );
+    int i_ret = lua_ExecuteFunction( p_mgr, p_ext, "deactivate", LUA_END );
+
+    if ( p_ext->p_sys->L == NULL )
+        return VLC_EGENERIC;
+    lua_close( p_ext->p_sys->L );
+    p_ext->p_sys->L = NULL;
+
+    return i_ret;
 }
 
 int lua_ExtensionWidgetClick( extensions_manager_t *p_mgr,

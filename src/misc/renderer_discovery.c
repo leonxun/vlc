@@ -22,10 +22,10 @@
 # include "config.h"
 #endif
 
+#include <stdatomic.h>
 #include <assert.h>
 
 #include <vlc_common.h>
-#include <vlc_atomic.h>
 #include <vlc_renderer_discovery.h>
 #include <vlc_probe.h>
 #include <vlc_modules.h>
@@ -88,10 +88,10 @@ vlc_renderer_item_new(const char *psz_type, const char *psz_name,
                  psz_extra_sout != NULL ? psz_extra_sout : "") == -1)
         goto error;
 
-    if ((p_item->psz_icon_uri = strdup(psz_icon_uri)) == NULL)
+    if (psz_icon_uri && (p_item->psz_icon_uri = strdup(psz_icon_uri)) == NULL)
         goto error;
 
-    if ((p_item->psz_demux_filter = strdup(psz_demux_filter)) == NULL)
+    if (psz_demux_filter && (p_item->psz_demux_filter = strdup(psz_demux_filter)) == NULL)
         goto error;
 
     p_item->i_flags = i_flags;
@@ -168,7 +168,9 @@ vlc_renderer_item_release(vlc_renderer_item_t *p_item)
 {
     assert(p_item != NULL);
 
-    if (atomic_fetch_sub(&p_item->refs, 1) != 1)
+    int refs = atomic_fetch_sub(&p_item->refs, 1);
+    assert(refs != 0 );
+    if( refs != 1 )
         return;
     item_free(p_item);
 }
@@ -209,8 +211,8 @@ vlc_rd_get_names(vlc_object_t *p_obj, char ***pppsz_names,
         return VLC_EGENERIC;
     }
 
-    char **ppsz_names = malloc(sizeof(char *) * (i_count + 1));
-    char **ppsz_longnames = malloc(sizeof(char *) * (i_count + 1));
+    char **ppsz_names = vlc_alloc(i_count + 1, sizeof(char *));
+    char **ppsz_longnames = vlc_alloc(i_count + 1, sizeof(char *));
 
     if (unlikely(ppsz_names == NULL || ppsz_longnames == NULL))
     {

@@ -59,14 +59,16 @@ int vout_OpenWrapper(vout_thread_t *vout,
     /* */
     const mtime_t double_click_timeout = 300000;
     const mtime_t hide_timeout = var_CreateGetInteger(vout, "mouse-hide-timeout") * 1000;
+    char *modlist = var_InheritString(vout, "vout");
 
-    if (splitter_name) {
-        sys->display.vd = vout_NewSplitter(vout, &vout->p->original, state, "$vout", splitter_name,
+    if (splitter_name)
+        sys->display.vd = vout_NewSplitter(vout, &vout->p->original, state, modlist, splitter_name,
                                            double_click_timeout, hide_timeout);
-    } else {
-        sys->display.vd = vout_NewDisplay(vout, &vout->p->original, state, "$vout",
+    else
+        sys->display.vd = vout_NewDisplay(vout, &vout->p->original, state, modlist,
                                           double_click_timeout, hide_timeout);
-    }
+    free(modlist);
+
     if (!sys->display.vd) {
         free(sys->display.title);
         return VLC_EGENERIC;
@@ -120,7 +122,6 @@ int vout_InitWrapper(vout_thread_t *vout)
 {
     vout_thread_sys_t *sys = vout->p;
     vout_display_t *vd = sys->display.vd;
-    video_format_t source = vd->source;
 
     sys->display.use_dr = !vout_IsDisplayFiltered(vd);
     const bool allow_dr = !vd->info.has_pictures_invalid && !vd->info.is_slow && sys->display.use_dr;
@@ -149,7 +150,7 @@ int vout_InitWrapper(vout_thread_t *vout)
         sys->display_pool = display_pool;
     } else if (!sys->decoder_pool) {
         sys->decoder_pool =
-            picture_pool_NewFromFormat(&source,
+            picture_pool_NewFromFormat(&vd->source,
                                        __MAX(VOUT_MAX_PICTURES,
                                              reserved_picture + decoder_picture - DISPLAY_PICTURE_COUNT));
         if (!sys->decoder_pool)

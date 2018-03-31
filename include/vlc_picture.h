@@ -26,6 +26,8 @@
 #ifndef VLC_PICTURE_H
 #define VLC_PICTURE_H 1
 
+#include <assert.h>
+
 /**
  * \file
  * This file defines picture structures and functions in vlc
@@ -46,8 +48,8 @@ typedef struct plane_t
     int i_pixel_pitch;
 
     /* Variables used for pictures with margins */
-    int i_visible_lines;            /**< How many visible lines are there ? */
-    int i_visible_pitch;            /**< How many visible pixels are there ? */
+    int i_visible_lines;            /**< How many visible lines are there? */
+    int i_visible_pitch;            /**< How many visible pixels are there? */
 
 } plane_t;
 
@@ -55,6 +57,12 @@ typedef struct plane_t
  * Maximum number of plane for a picture
  */
 #define PICTURE_PLANE_MAX (VOUT_MAX_PLANES)
+
+typedef struct picture_context_t
+{
+    void (*destroy)(struct picture_context_t *);
+    struct picture_context_t *(*copy)(struct picture_context_t *);
+} picture_context_t;
 
 /**
  * Video picture
@@ -81,11 +89,10 @@ struct picture_t
      * Those properties can be changed by the decoder
      * @{
      */
-    bool            b_progressive;          /**< is it a progressive frame ? */
+    bool            b_progressive;          /**< is it a progressive frame? */
     bool            b_top_field_first;             /**< which field is first */
-    unsigned int    i_nb_fields;                  /**< # of displayed fields */
-    void          * context;          /**< video format-specific data pointer,
-             * must point to a (void (*)(void*)) pointer to free the context */
+    unsigned int    i_nb_fields;                  /**< number of displayed fields */
+    picture_context_t *context;      /**< video format-specific data pointer */
     /**@}*/
 
     /** Private data - the video output plugin might want to put stuff here to
@@ -154,14 +161,6 @@ VLC_API picture_t *picture_Hold( picture_t *p_picture );
 VLC_API void picture_Release( picture_t *p_picture );
 
 /**
- * This function will return true if you are not the only owner of the
- * picture.
- *
- * It is only valid if it is created using picture_New.
- */
-VLC_API bool picture_IsReferenced( picture_t *p_picture );
-
-/**
  * This function will copy all picture dynamic properties.
  */
 VLC_API void picture_CopyProperties( picture_t *p_dst, const picture_t *p_src );
@@ -190,6 +189,17 @@ VLC_API void plane_CopyPixels( plane_t *p_dst, const plane_t *p_src );
  * \param p_src pointer to the source picture.
  */
 VLC_API void picture_Copy( picture_t *p_dst, const picture_t *p_src );
+
+/**
+ * Perform a shallow picture copy
+ *
+ * This function makes a shallow copy of an existing picture. The same planes
+ * and resources will be used, and the cloned picture reference count will be
+ * incremented.
+ *
+ * \return A clone picture on success, NULL on error.
+ */
+VLC_API picture_t *picture_Clone(picture_t *pic);
 
 /**
  * This function will export a picture to an encoded bitstream.
@@ -245,6 +255,20 @@ enum
 #define V_PITCH      p[V_PLANE].i_pitch
 #define A_PIXELS     p[A_PLANE].p_pixels
 #define A_PITCH      p[A_PLANE].i_pitch
+
+/**
+ * Swap UV planes of a Tri Planars picture.
+ *
+ * It just swap the planes information without doing any copy.
+ */
+static inline void picture_SwapUV(picture_t *picture)
+{
+    assert(picture->i_planes == 3);
+
+    plane_t tmp_plane   = picture->p[U_PLANE];
+    picture->p[U_PLANE] = picture->p[V_PLANE];
+    picture->p[V_PLANE] = tmp_plane;
+}
 
 /**@}*/
 

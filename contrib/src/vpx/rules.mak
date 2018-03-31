@@ -33,7 +33,16 @@ endif
 VPX_LDFLAGS := $(LDFLAGS)
 
 ifeq ($(ARCH),arm)
+ifdef HAVE_IOS
+ifneq ($(filter armv7s%,$(subst -, ,$(HOST))),)
+VPX_ARCH := armv7s
+else
 VPX_ARCH := armv7
+endif
+else ifndef HAVE_WIN32
+# libvpx doesn't support win32/arm with clang yet
+VPX_ARCH := armv7
+endif
 else ifeq ($(ARCH),i386)
 VPX_ARCH := x86
 else ifeq ($(ARCH),mips)
@@ -58,8 +67,13 @@ VPX_OS := darwin9
 else
 VPX_OS := darwin10
 endif
+VPX_CROSS :=
 else ifdef HAVE_IOS
+ifeq ($(ARCH),arm)
+VPX_OS := darwin
+else
 VPX_OS := darwin11
+endif
 else ifdef HAVE_SOLARIS
 VPX_OS := solaris
 else ifdef HAVE_WIN64 # must be before WIN32
@@ -78,7 +92,6 @@ endif
 endif
 
 VPX_CONF := \
-	--enable-runtime-cpu-detect \
 	--disable-docs \
 	--disable-examples \
 	--disable-unit-tests \
@@ -86,6 +99,10 @@ VPX_CONF := \
 	--disable-install-docs \
 	--disable-dependency-tracking \
 	--enable-vp9-highbitdepth
+
+ifndef HAVE_IOS
+VPX_CONF += --enable-runtime-cpu-detect
+endif
 
 ifndef BUILD_ENCODERS
 VPX_CONF += --disable-vp8-encoder --disable-vp9-encoder
@@ -109,7 +126,9 @@ endif
 ifeq ($(ARCH),aarch64)
 VPX_LDFLAGS += -arch arm64
 else
+ifndef HAVE_IOS
 VPX_LDFLAGS += -arch $(ARCH)
+endif
 endif
 endif
 ifdef HAVE_ANDROID

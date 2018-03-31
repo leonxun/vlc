@@ -26,6 +26,7 @@
 
 /**
  * \defgroup strings String helpers
+ * \ingroup cext
  * @{
  * \file
  * Helper functions for nul-terminated strings
@@ -147,6 +148,8 @@ static inline char *str_format( input_thread_t *input, const char *fmt )
     free( s1 );
     return s2;
 }
+
+VLC_API int vlc_filenamecmp(const char *, const char *);
 
 void filename_sanitize(char *);
 

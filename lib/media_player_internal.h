@@ -32,13 +32,13 @@
 #include <vlc/vlc.h>
 #include <vlc/libvlc_media.h>
 #include <vlc_input.h>
-#include <vlc_vout.h>
+#include <vlc_viewpoint.h>
 
 #include "../modules/audio_filter/equalizer_presets.h"
 
 struct libvlc_media_player_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     int                i_refcount;
     vlc_mutex_t        object_lock;
@@ -47,6 +47,7 @@ struct libvlc_media_player_t
     {
         input_thread_t   *p_thread;
         input_resource_t *p_resource;
+        vlc_renderer_item_t *p_renderer;
         vlc_mutex_t       lock;
     } input;
 

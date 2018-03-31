@@ -30,6 +30,7 @@
 #include "playlist/BaseAdaptationSet.h"
 #include "playlist/BaseRepresentation.h"
 #include "http/HTTPConnectionManager.h"
+#include "http/AuthStorage.hpp"
 #include "logic/AlwaysBestAdaptationLogic.h"
 #include "logic/RateBasedAdaptationLogic.h"
 #include "logic/AlwaysLowestAdaptationLogic.hpp"
@@ -48,6 +49,7 @@ using namespace adaptive::logic;
 using namespace adaptive;
 
 PlaylistManager::PlaylistManager( demux_t *p_demux_,
+                                  AuthStorage *auth,
                                   AbstractPlaylist *pl,
                                   AbstractStreamFactory *factory,
                                   AbstractAdaptationLogic::LogicType type ) :
@@ -59,6 +61,7 @@ PlaylistManager::PlaylistManager( demux_t *p_demux_,
              p_demux        ( p_demux_ )
 {
     currentPeriod = playlist->getFirstPeriod();
+    authStorage = auth;
     failedupdates = 0;
     b_thread = false;
     b_buffering = false;
@@ -83,6 +86,7 @@ PlaylistManager::~PlaylistManager   ()
     delete playlist;
     delete conManager;
     delete logic;
+    delete authStorage;
     vlc_cond_destroy(&waitcond);
     vlc_mutex_destroy(&lock);
     vlc_mutex_destroy(&demux.lock);
@@ -150,7 +154,10 @@ bool PlaylistManager::setupPeriod()
 
 bool PlaylistManager::start()
 {
-    if(!conManager && !(conManager = new (std::nothrow) HTTPConnectionManager(VLC_OBJECT(p_demux->s))))
+    if(!conManager &&
+       !(conManager =
+         new (std::nothrow) HTTPConnectionManager(VLC_OBJECT(p_demux->s), authStorage))
+      )
         return false;
 
     if(!setupPeriod())
@@ -189,7 +196,7 @@ struct PrioritizedAbstractStream
     AbstractStream *st;
 };
 
-static bool streamCompare(PrioritizedAbstractStream a,  PrioritizedAbstractStream b)
+static bool streamCompare(const PrioritizedAbstractStream &a,  const PrioritizedAbstractStream &b)
 {
     if( a.status >= b.status ) /* Highest prio is higer value in enum */
     {
@@ -287,7 +294,7 @@ void PlaylistManager::drain()
             if (st->isDisabled())
                 continue;
 
-            b_drained &= st->drain();
+            b_drained &= st->decodersDrained();
         }
 
         if(b_drained)
@@ -339,6 +346,7 @@ mtime_t PlaylistManager::getDuration() const
 bool PlaylistManager::setPosition(mtime_t time)
 {
     bool ret = true;
+    bool hasValidStream = false;
     for(int real = 0; real < 2; real++)
     {
         /* Always probe if we can seek first */
@@ -347,10 +355,18 @@ bool PlaylistManager::setPosition(mtime_t time)
         {
             AbstractStream *st = *it;
             if(!st->isDisabled())
+            {
+                hasValidStream = true;
                 ret &= st->setPosition(time, !real);
+            }
         }
         if(!ret)
             break;
+    }
+    if(!hasValidStream)
+    {
+        msg_Warn(p_demux, "there is no valid streams");
+        ret = false;
     }
     return ret;
 }
@@ -614,8 +630,7 @@ void PlaylistManager::setBufferingRunState(bool b)
 {
     vlc_mutex_lock(&lock);
     b_buffering = b;
-    if(b_buffering)
-        vlc_cond_signal(&waitcond);
+    vlc_cond_signal(&waitcond);
     vlc_mutex_unlock(&lock);
 }
 
@@ -629,14 +644,17 @@ void PlaylistManager::Run()
         mutex_cleanup_push(&lock);
         while(!b_buffering)
             vlc_cond_wait(&waitcond, &lock);
+        vlc_testcancel();
         vlc_cleanup_pop();
 
         if(needsUpdate())
         {
+            int canc = vlc_savecancel();
             if(updatePlaylist())
                 scheduleNextUpdate();
             else
                 failedupdates++;
+            vlc_restorecancel(canc);
         }
 
         vlc_mutex_lock(&demux.lock);
@@ -650,9 +668,9 @@ void PlaylistManager::Run()
         if(i_return != AbstractStream::buffering_lessthanmin)
         {
             mtime_t i_deadline = mdate();
-            if (i_return == AbstractStream::buffering_ongoing)
-                i_deadline += (CLOCK_FREQ / 20);
-            if (i_return == AbstractStream::buffering_full)
+            if(i_return == AbstractStream::buffering_ongoing)
+                i_deadline += (CLOCK_FREQ / 100);
+            else if(i_return == AbstractStream::buffering_full)
                 i_deadline += (CLOCK_FREQ / 10);
             else if(i_return == AbstractStream::buffering_end)
                 i_deadline += (CLOCK_FREQ);
@@ -664,8 +682,9 @@ void PlaylistManager::Run()
             vlc_mutex_unlock(&demux.lock);
 
             mutex_cleanup_push(&lock);
-            while(vlc_cond_timedwait(&waitcond, &lock, i_deadline) == 0
-                 && i_deadline < mdate());
+            while(b_buffering &&
+                    vlc_cond_timedwait(&waitcond, &lock, i_deadline) == 0 &&
+                    i_deadline > mdate());
             vlc_cleanup_pop();
         }
     }
@@ -743,7 +762,7 @@ AbstractAdaptationLogic *PlaylistManager::createLogic(AbstractAdaptationLogic::L
         case AbstractAdaptationLogic::NearOptimal:
         {
             NearOptimalAdaptationLogic *noplogic =
-                    new (std::nothrow) NearOptimalAdaptationLogic(VLC_OBJECT(p_demux));
+                    new (std::nothrow) NearOptimalAdaptationLogic();
             if(noplogic)
                 conn->setDownloadRateObserver(noplogic);
             logic = noplogic;

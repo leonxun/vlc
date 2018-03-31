@@ -58,6 +58,7 @@ typedef struct playlist_private_t
     input_thread_t *      p_input;  /**< the input thread associated
                                      * with the current item */
     input_resource_t *   p_input_resource; /**< input resources */
+    vlc_renderer_item_t *p_renderer;
     struct {
         /* Current status. These fields are readonly, only the playlist
          * main loop can touch it*/
@@ -75,6 +76,7 @@ typedef struct playlist_private_t
         bool          b_request;/**< Set to true by the requester
                                            The playlist sets it back to false
                                            when processing the request */
+        bool input_dead; /**< Set when input has finished. */
     } request;
 
     vlc_thread_t thread; /**< engine thread */
@@ -89,7 +91,7 @@ typedef struct playlist_private_t
     bool     b_preparse; /**< Preparse items */
 } playlist_private_t;
 
-#define pl_priv( pl ) ((playlist_private_t *)(pl))
+#define pl_priv( pl ) container_of(pl, playlist_private_t, public_data)
 
 /*****************************************************************************
  * Prototypes

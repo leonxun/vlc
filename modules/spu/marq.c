@@ -107,7 +107,7 @@ struct filter_sys_t
                             "or time format string sequences.")
 #define OPACITY_TEXT N_("Opacity")
 #define OPACITY_LONGTEXT N_("Opacity (inverse of transparency) of " \
-    "overlayed text. 0 = transparent, 255 = totally opaque. " )
+    "overlayed text. 0 = transparent, 255 = totally opaque." )
 #define SIZE_TEXT N_("Font size, pixels")
 #define SIZE_LONGTEXT N_("Font size, in pixels. Default is 0 (use default " \
     "font size)." )
@@ -272,7 +272,6 @@ static subpicture_t *Filter( filter_t *p_filter, mtime_t date )
 {
     filter_sys_t *p_sys = p_filter->p_sys;
     subpicture_t *p_spu = NULL;
-    video_format_t fmt;
 
     vlc_mutex_lock( &p_sys->lock );
     if( p_sys->last_time + p_sys->i_refresh > date )
@@ -303,13 +302,10 @@ static subpicture_t *Filter( filter_t *p_filter, mtime_t date )
     if( !p_spu )
         goto out;
 
-    memset( &fmt, 0, sizeof(video_format_t) );
-    fmt.i_chroma = VLC_CODEC_TEXT;
-    fmt.i_width = fmt.i_height = 0;
-    fmt.i_x_offset = 0;
-    fmt.i_y_offset = 0;
-    fmt.i_sar_den = fmt.i_sar_num = 1;
-    p_spu->p_region = subpicture_region_New( &fmt );
+    video_format_t vfmt;
+    video_format_Init( &vfmt, VLC_CODEC_TEXT );
+    vfmt.i_sar_den = vfmt.i_sar_num = 1;
+    p_spu->p_region = subpicture_region_New( &vfmt );
     if( !p_spu->p_region )
     {
         subpicture_Delete( p_spu );
@@ -421,7 +417,6 @@ static int MarqueeCallback( vlc_object_t *p_this, char const *psz_var,
     /* willing to accept a match against marq-pos */
     {
         p_sys->i_pos = newval.i_int;
-        p_sys->i_xoff = -1;       /* force to relative positioning */
     }
 
     free( p_sys->message );

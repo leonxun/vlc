@@ -55,6 +55,8 @@
 #include "packetizer_helper.h"
 #include "startcode_helper.h"
 
+#include <limits.h>
+
 #define SYNC_INTRAFRAME_TEXT N_("Sync on Intra Frame")
 #define SYNC_INTRAFRAME_LONGTEXT N_("Normally the packetizer would " \
     "sync on the next full frame. This flags instructs the packetizer " \
@@ -77,6 +79,36 @@ vlc_module_begin ()
     add_bool( "packetizer-mpegvideo-sync-iframe", false, SYNC_INTRAFRAME_TEXT,
               SYNC_INTRAFRAME_LONGTEXT, true )
 vlc_module_end ()
+
+enum mpeg_startcode_e
+{
+    PICTURE_STARTCODE          = 0x00,
+    SLICE_STARTCODE_FIRST      = 0x01,
+    SLICE_STARTCODE_LAST       = 0xAF,
+    USER_DATA_STARTCODE        = 0xB2,
+    SEQUENCE_HEADER_STARTCODE  = 0xB3,
+    SEQUENCE_ERROR_STARTCODE   = 0xB4,
+    EXTENSION_STARTCODE        = 0xB5,
+    SEQUENCE_END_STARTCODE     = 0xB7,
+    GROUP_STARTCODE            = 0xB8,
+    SYSTEM_STARTCODE_FIRST     = 0xB9,
+    SYSTEM_STARTCODE_LAST      = 0xFF,
+};
+
+enum extension_start_code_identifier_e
+{
+    SEQUENCE_EXTENSION_ID                   = 0x01,
+    SEQUENCE_DISPLAY_EXTENSION_ID           = 0x02,
+    QUANT_MATRIX_EXTENSION_ID               = 0x03,
+    COPYRIGHT_EXTENSION_ID                  = 0x04,
+    SEQUENCE_SCALABLE_EXTENSION_ID          = 0x05,
+    PICTURE_DISPLAY_EXTENSION_ID            = 0x07,
+    PICTURE_CODING_EXTENSION_ID             = 0x08,
+    PICTURE_SPATIAL_SCALABLE_EXTENSION_ID   = 0x09,
+    PICTURE_TEMPORAL_SCALABLE_EXTENSION_ID  = 0x0A,
+    CAMERA_PARAMETERS_EXTENSION_ID          = 0x0B,
+    ITU_T_EXTENSION_ID                      = 0x0C,
+};
 
 /*****************************************************************************
  * Local prototypes
@@ -145,7 +177,7 @@ struct decoder_sys_t
 
 static block_t *Packetize( decoder_t *, block_t ** );
 static void PacketizeFlush( decoder_t * );
-static block_t *GetCc( decoder_t *p_dec, bool pb_present[4], int * );
+static block_t *GetCc( decoder_t *p_dec, decoder_cc_desc_t * );
 
 static void PacketizeReset( void *p_private, bool b_broken );
 static block_t *PacketizeParse( void *p_private, bool *pb_ts_used, block_t * );
@@ -166,14 +198,13 @@ static int Open( vlc_object_t *p_this )
     if( p_dec->fmt_in.i_codec != VLC_CODEC_MPGV )
         return VLC_EGENERIC;
 
-    es_format_Init( &p_dec->fmt_out, VIDEO_ES, VLC_CODEC_MPGV );
-    p_dec->fmt_out.i_original_fourcc = p_dec->fmt_in.i_original_fourcc;
-
-
     p_dec->p_sys = p_sys = malloc( sizeof( decoder_sys_t ) );
     if( !p_dec->p_sys )
         return VLC_ENOMEM;
     memset( p_dec->p_sys, 0, sizeof( decoder_sys_t ) );
+
+    p_dec->fmt_out.i_codec = VLC_CODEC_MPGV;
+    p_dec->fmt_out.i_original_fourcc = p_dec->fmt_in.i_original_fourcc;
 
     /* Misc init */
     packetizer_Init( &p_sys->packetizer,
@@ -189,9 +220,9 @@ static int Open( vlc_object_t *p_this )
 
     p_sys->i_dts =
     p_sys->i_pts = VLC_TS_INVALID;
-    date_Init( &p_sys->dts, 1, 1 );
+    date_Init( &p_sys->dts, 30000, 1001 );
     date_Set( &p_sys->dts, VLC_TS_INVALID );
-    date_Init( &p_sys->prev_iframe_dts, 1, 1 );
+    date_Init( &p_sys->prev_iframe_dts, 30000, 1001 );
     date_Set( &p_sys->prev_iframe_dts, VLC_TS_INVALID );
 
     p_sys->i_frame_rate = 2 * 30000;
@@ -281,17 +312,12 @@ static void PacketizeFlush( decoder_t *p_dec )
 /*****************************************************************************
  * GetCc:
  *****************************************************************************/
-static block_t *GetCc( decoder_t *p_dec, bool pb_present[4], int *pi_reorder_depth )
+static block_t *GetCc( decoder_t *p_dec, decoder_cc_desc_t *p_desc )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
     block_t *p_cc;
-    int i;
-    *pi_reorder_depth = 0;
 
-    for( i = 0; i < 4; i++ )
-        pb_present[i] = p_sys->cc.pb_present[i];
-
-    if( p_sys->cc.i_data <= 0 )
+    if( !p_sys->cc.b_reorder && p_sys->cc.i_data <= 0 )
         return NULL;
 
     p_cc = block_Alloc( p_sys->cc.i_data );
@@ -300,7 +326,11 @@ static block_t *GetCc( decoder_t *p_dec, bool pb_present[4], int *pi_reorder_dep
         memcpy( p_cc->p_buffer, p_sys->cc.p_data, p_sys->cc.i_data );
         p_cc->i_dts = 
         p_cc->i_pts = p_sys->cc.b_reorder ? p_sys->i_cc_pts : p_sys->i_cc_dts;
-        p_cc->i_flags = ( p_sys->cc.b_reorder ? p_sys->i_cc_flags : BLOCK_FLAG_TYPE_P ) & ( BLOCK_FLAG_TYPE_I|BLOCK_FLAG_TYPE_P|BLOCK_FLAG_TYPE_B);
+        p_cc->i_flags = p_sys->i_cc_flags & BLOCK_FLAG_TYPE_MASK;
+
+        p_desc->i_608_channels = p_sys->cc.i_608channels;
+        p_desc->i_708_channels = p_sys->cc.i_708channels;
+        p_desc->i_reorder_depth = p_sys->cc.b_reorder ? 0 : -1;
     }
     cc_Flush( &p_sys->cc );
     return p_cc;
@@ -338,7 +368,7 @@ static block_t *PacketizeParse( void *p_private, bool *pb_ts_used, block_t *p_bl
     decoder_sys_t *p_sys = p_dec->p_sys;
 
     /* Check if we have a picture start code */
-    *pb_ts_used = p_block->p_buffer[3] == 0x00;
+    *pb_ts_used = p_block->p_buffer[3] == PICTURE_STARTCODE;
 
     p_block = ParseMPEGBlock( p_dec, p_block );
     if( p_block )
@@ -390,11 +420,12 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
     decoder_sys_t *p_sys = p_dec->p_sys;
     block_t *p_pic = NULL;
 
+    const enum mpeg_startcode_e startcode = p_frag->p_buffer[3];
     /*
      * Check if previous picture is finished
      */
     if( ( p_sys->b_frame_slice &&
-          (p_frag->p_buffer[3] == 0x00 || p_frag->p_buffer[3] > 0xaf) ) &&
+          (startcode == PICTURE_STARTCODE || startcode >  SLICE_STARTCODE_LAST ) ) &&
           p_sys->p_seq == NULL )
     {
         /* We have a picture but without a sequence header we can't
@@ -407,9 +438,10 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
 
     }
     else if( p_sys->b_frame_slice &&
-             (p_frag->p_buffer[3] == 0x00 || p_frag->p_buffer[3] > 0xaf) )
+             (startcode == PICTURE_STARTCODE ||
+             (startcode >  SLICE_STARTCODE_LAST && startcode != EXTENSION_STARTCODE )) )
     {
-        const bool b_eos = p_frag->p_buffer[3] == 0xb7;
+        const bool b_eos = startcode == SEQUENCE_END_STARTCODE;
 
         if( b_eos )
         {
@@ -418,6 +450,8 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
         }
 
         p_pic = block_ChainGather( p_sys->p_frame );
+        if( p_pic == NULL )
+            return p_pic;
 
         if( b_eos )
             p_pic->i_flags |= BLOCK_FLAG_END_OF_SEQUENCE;
@@ -608,7 +642,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
         p_sys->b_cc_reset = true;
         p_sys->i_cc_pts = p_pic->i_pts;
         p_sys->i_cc_dts = p_pic->i_dts;
-        p_sys->i_cc_flags = p_pic->i_flags;
+        p_sys->i_cc_flags = p_pic->i_flags & BLOCK_FLAG_TYPE_MASK;
     }
 
     if( !p_pic && p_sys->b_cc_reset )
@@ -622,7 +656,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
     /*
      * Check info of current fragment
      */
-    if( p_frag->p_buffer[3] == 0xb8 )
+    if( startcode == GROUP_STARTCODE )
     {
         /* Group start code */
         if( p_sys->p_seq &&
@@ -638,7 +672,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
             p_sys->i_seq_old = 0;
         }
     }
-    else if( p_frag->p_buffer[3] == 0xb3 && p_frag->i_buffer >= 8 )
+    else if( startcode == SEQUENCE_HEADER_STARTCODE && p_frag->i_buffer >= 8 )
     {
         /* Sequence header code */
         static const int code_to_frame_rate[16][2] =
@@ -679,7 +713,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
 
         if( ( p_sys->i_frame_rate != p_dec->fmt_out.video.i_frame_rate ||
               p_dec->fmt_out.video.i_frame_rate_base != p_sys->i_frame_rate_base ) &&
-            p_sys->i_frame_rate && p_sys->i_frame_rate_base )
+            p_sys->i_frame_rate && p_sys->i_frame_rate_base && p_sys->i_frame_rate <= UINT_MAX/2 )
         {
             date_Change( &p_sys->dts, 2 * p_sys->i_frame_rate, p_sys->i_frame_rate_base );
             date_Change( &p_sys->prev_iframe_dts, 2 * p_sys->i_frame_rate, p_sys->i_frame_rate_base );
@@ -700,12 +734,13 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
             p_sys->b_inited = 1;
         }
     }
-    else if( p_frag->p_buffer[3] == 0xb5 )
+    else if( startcode == EXTENSION_STARTCODE && p_frag->i_buffer > 4 )
     {
-        int i_type = p_frag->p_buffer[4] >> 4;
+        /* extension_start_code_identifier */
+        const enum extension_start_code_identifier_e extid = p_frag->p_buffer[4] >> 4;
 
         /* Extension start code */
-        if( i_type == 0x01 )
+        if( extid == SEQUENCE_EXTENSION_ID )
         {
 #if 0
             static const int mpeg2_aspect[16][2] =
@@ -744,7 +779,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
 #endif
 
         }
-        else if( i_type == 0x08 && p_frag->i_buffer > 8 )
+        else if( extid == PICTURE_CODING_EXTENSION_ID && p_frag->i_buffer > 8 )
         {
             /* picture extension */
             p_sys->i_picture_structure = p_frag->p_buffer[6]&0x03;
@@ -752,7 +787,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
             p_sys->i_repeat_first_field= (p_frag->p_buffer[7]>>1)&0x01;
             p_sys->i_progressive_frame = p_frag->p_buffer[8] >> 7;
         }
-        else if( i_type == 0x02 && p_frag->i_buffer > 8 )
+        else if( extid == SEQUENCE_DISPLAY_EXTENSION_ID && p_frag->i_buffer > 8 )
         {
             /* Sequence display extension */
             bool contains_color_description = (p_frag->p_buffer[4] & 0x01);
@@ -804,6 +839,7 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
                         break;
                     case 5: /* BT.470BG */
                     case 6: /* SMPTE 170 M */
+                    case 7: /* SMPTE 240 M */
                         p_dec->fmt_out.video.space = COLOR_SPACE_BT601;
                         break;
                     default:
@@ -813,12 +849,31 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
 
         }
     }
-    else if( p_frag->p_buffer[3] == 0xb2 && p_frag->i_buffer > 4 )
+    else if( startcode == USER_DATA_STARTCODE && p_frag->i_buffer > 8 )
     {
+        /* Frame Packing extension identifier as H262 2012 Amd4 Annex L */
+        if( !memcmp( &p_frag->p_buffer[4], "JP3D", 4 ) &&
+            p_frag->i_buffer > 11 && p_frag->p_buffer[8] == 0x03 &&
+            p_dec->fmt_in.video.multiview_mode == MULTIVIEW_2D )
+        {
+            video_multiview_mode_t mode;
+            switch( p_frag->p_buffer[9] & 0x7F )
+            {
+                case 0x03:
+                    mode = MULTIVIEW_STEREO_SBS; break;
+                case 0x04:
+                    mode = MULTIVIEW_STEREO_TB; break;
+                case 0x08:
+                default:
+                    mode = MULTIVIEW_2D; break;
+            }
+            p_dec->fmt_out.video.multiview_mode = mode;
+        }
+        else
         cc_ProbeAndExtract( &p_sys->cc, p_sys->i_top_field_first,
                     &p_frag->p_buffer[4], p_frag->i_buffer - 4 );
     }
-    else if( p_frag->p_buffer[3] == 0x00 )
+    else if( startcode == PICTURE_STARTCODE )
     {
         /* Picture start code */
         p_sys->i_seq_old++;
@@ -833,7 +888,8 @@ static block_t *ParseMPEGBlock( decoder_t *p_dec, block_t *p_frag )
         p_sys->i_dts = p_frag->i_dts;
         p_sys->i_pts = p_frag->i_pts;
     }
-    else if( p_frag->p_buffer[3] >= 0x01 && p_frag->p_buffer[3] <= 0xaf )
+    else if( startcode >= SLICE_STARTCODE_FIRST &&
+             startcode <= SLICE_STARTCODE_LAST )
     {
         /* Slice start code */
         p_sys->b_frame_slice = true;

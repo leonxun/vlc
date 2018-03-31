@@ -104,11 +104,11 @@ void libvlc_media_library_retain( libvlc_media_library_t * p_mlib )
  **************************************************************************/
 int libvlc_media_library_load( libvlc_media_library_t * p_mlib )
 {
-    char *psz_datadir = config_GetUserDir( VLC_DATA_DIR );
+    char *psz_datadir = config_GetUserDir( VLC_USERDATA_DIR );
     char * psz_uri;
 
     if( psz_datadir == NULL
-     || asprintf( &psz_uri, "file/xspf-open://%s" DIR_SEP "ml.xsp",
+     || asprintf( &psz_uri, "file/directory://%s" DIR_SEP "ml.xsp",
                   psz_datadir ) == -1 )
         psz_uri = NULL;
     free( psz_datadir );

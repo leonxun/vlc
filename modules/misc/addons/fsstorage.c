@@ -100,7 +100,7 @@ static char * getAddonInstallDir( addon_type_t t )
 {
     const char *psz_subdir = NULL;
     char *psz_dir;
-    char *psz_userdir = config_GetUserDir( VLC_DATA_DIR );
+    char *psz_userdir = config_GetUserDir( VLC_USERDATA_DIR );
     if ( !psz_userdir ) return NULL;
 
     for ( unsigned int i=0; i< ARRAY_SIZE(addons_dirs); i++ )
@@ -218,7 +218,10 @@ static int ListSkins( addons_finder_t *p_finder )
             break;
 
         if ( FileBelongsToManagedAddon( p_finder, ADDON_SKIN2, psz_file ) )
+        {
+            free( psz_file );
              continue;
+        }
 
         char *psz_uri;
         if( asprintf( &psz_uri, "file://%s/%s#!/theme.xml", psz_dir, psz_file ) >= 0)
@@ -418,15 +421,15 @@ static int InstallFile( addons_storage_t *p_this, const char *psz_downloadlink,
         if ( fwrite( &buffer, i_read, 1, p_destfile ) < 1 )
         {
             msg_Err( p_this, "Failed to write to Addon file" );
-            fclose( p_destfile );
-            vlc_stream_Delete( p_stream );
-            return VLC_EGENERIC;
+            break;
         }
     }
 
     fclose( p_destfile );
+    if ( i_read < 0 )
+        vlc_unlink( psz_dest );
     vlc_stream_Delete( p_stream );
-    return VLC_SUCCESS;
+    return i_read >= 0 ? VLC_SUCCESS : VLC_EGENERIC;
 }
 
 static int InstallAllFiles( addons_storage_t *p_this, const addon_entry_t *p_entry )
@@ -539,7 +542,7 @@ static int WriteCatalog( addons_storage_t *p_storage,
     char *psz_file;
     char *psz_file_tmp;
     char *psz_tempstring;
-    char *psz_userdir = config_GetUserDir( VLC_DATA_DIR );
+    char *psz_userdir = config_GetUserDir( VLC_USERDATA_DIR );
     if ( !psz_userdir ) return VLC_ENOMEM;
 
     if ( asprintf( &psz_file, "%s%s", psz_userdir, ADDONS_CATALOG ) < 1 )
@@ -668,7 +671,7 @@ static int WriteCatalog( addons_storage_t *p_storage,
 static int LoadCatalog( addons_finder_t *p_finder )
 {
     char *psz_path;
-    char * psz_userdir = config_GetUserDir( VLC_DATA_DIR );
+    char * psz_userdir = config_GetUserDir( VLC_USERDATA_DIR );
     if ( !psz_userdir ) return VLC_ENOMEM;
 
     if ( asprintf( &psz_path, "%s%s", psz_userdir, ADDONS_CATALOG ) < 1 )

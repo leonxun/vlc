@@ -6,12 +6,8 @@
 # something. DIST_SUBDIRS stores the directories where nothing is built but
 # which have makefiles with distribution information.
 #  - src (libvlccore) is nedeed by modules
-DIST_SUBDIRS = m4 compat doc po share src modules lib bin test
-SUBDIRS = compat doc po share src modules lib
-if BUILD_VLC
-SUBDIRS += bin
-endif
-SUBDIRS += test
+SUBDIRS = compat doc po share src modules lib bin test
+DIST_SUBDIRS = m4 $(SUBDIRS)
 
 EXTRA_DIST = \
 	extras/package/macosx/package.mak \
@@ -64,6 +60,11 @@ EXTRA_DIST += \
 	extras/tools/bootstrap \
 	extras/tools/packages.mak \
 	extras/tools/tools.mak \
+	extras/tools/SHA512SUMS \
+	extras/tools/bison-macOS-7df04f9.patch \
+	extras/tools/bison-macOS-c41f233c.patch \
+	extras/tools/libtool-2.4.2-bitcode.patch \
+	extras/tools/libtool-2.4.2-san.patch \
 	extras/tools/ragel-6.8-javacodegen.patch
 
 ###############################################################################
@@ -164,15 +165,15 @@ install-exec-hook:
 	if test "$(build)" = "$(host)"; then \
 		PATH="$(DESTDIR)$(bindir):$$PATH" \
 		LD_LIBRARY_PATH="$(DESTDIR)$(libdir):$$LD_LIBRARY_PATH" \
-		"$(DESTDIR)$(vlclibdir)/vlc-cache-gen$(EXEEXT)" \
-			 "$(DESTDIR)$(vlclibdir)/plugins" ; \
+		"$(DESTDIR)$(pkglibexecdir)/vlc-cache-gen$(EXEEXT)" \
+			 "$(DESTDIR)$(pkglibdir)/plugins" ; \
 	else \
 		echo "Cross-compilation: cache generation skipped!" ; \
 	fi
 endif
 
 uninstall-hook:
-	rm -f -- "$(DESTDIR)$(vlclibdir)/plugins/plugins.dat"
+	rm -f -- "$(DESTDIR)$(pkglibdir)/plugins/plugins.dat"
 
 ###############################################################################
 # Test coverage

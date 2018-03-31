@@ -113,7 +113,7 @@ struct mc_api
     /* Set before init */
     vlc_object_t *  p_obj;
     const char *    psz_mime;
-    int             i_cat;
+    enum es_format_category_e i_cat;
     vlc_fourcc_t    i_codec;
 
     /* Set after configure */
@@ -125,7 +125,7 @@ struct mc_api
     bool b_direct_rendering;
 
     void (*clean)(mc_api *);
-    int (*configure)(mc_api *, size_t i_h264_profile);
+    int (*configure)(mc_api *, int i_profile);
     int (*start)(mc_api *, union mc_api_args *p_args);
     int (*stop)(mc_api *);
     int (*flush)(mc_api *);
@@ -151,6 +151,9 @@ struct mc_api
 
     /* i_index is the index returned by dequeue_out and should be >= 0 */
     int (*release_out)(mc_api *, int i_index, bool b_render);
+
+    /* render a buffer at a specified ts */
+    int (*release_out_ts)(mc_api *, int i_index, int64_t i_ts_ns);
 
     /* Dynamically sets the output surface
      * Returns 0 on success, or MC_API_ERROR */

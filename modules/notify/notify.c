@@ -53,7 +53,7 @@ static void Close   ( vlc_object_t * );
 #define APPLICATION_NAME "VLC media player"
 
 #define TIMEOUT_TEXT N_("Timeout (ms)")
-#define TIMEOUT_LONGTEXT N_("How long the notification will be displayed ")
+#define TIMEOUT_LONGTEXT N_("How long the notification will be displayed.")
 
 vlc_module_begin ()
     set_category( CAT_INTERFACE )
@@ -233,14 +233,13 @@ static int ItemChange( vlc_object_t *p_this, const char *psz_var,
         {
         /* Load icon from share/ */
             GError *p_error = NULL;
-            char *psz_pixbuf;
-            char *psz_data = config_GetDataDir();
-            if( asprintf( &psz_pixbuf, "%s/icons/48x48/vlc.png", psz_data ) >= 0 )
+            char *psz_pixbuf = config_GetSysPath(VLC_SYSDATA_DIR,
+                                     "icons/hicolor/48x48/"PACKAGE_NAME".png");
+            if (psz_pixbuf != NULL)
             {
                 pix = gdk_pixbuf_new_from_file( psz_pixbuf, &p_error );
                 free( psz_pixbuf );
             }
-            free( psz_data );
         }
     }
 

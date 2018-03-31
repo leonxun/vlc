@@ -46,7 +46,7 @@ static void CloseDecoder  ( vlc_object_t * );
  "VLC partly implements this, but you can choose to disable all formatting.")
 
 vlc_module_begin ()
-    set_capability( "decoder", 40 )
+    set_capability( "spu decoder", 40 )
     set_shortname( N_("USFSubs"))
     set_description( N_("USF subtitles decoder") )
     set_callbacks( OpenDecoder, CloseDecoder )
@@ -127,7 +127,6 @@ static int OpenDecoder( vlc_object_t *p_this )
         return VLC_ENOMEM;
 
     p_dec->pf_decode = DecodeBlock;
-    p_dec->fmt_out.i_cat = SPU_ES;
     p_dec->fmt_out.i_codec = 0;
 
     /* init of p_sys */
@@ -868,7 +867,7 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
             {
                 subpicture_region_t *p_image_region = NULL;
 
-                char *psz_end = strcasestr( psz_subtitle, "</image>" );
+                psz_end = strcasestr( psz_subtitle, "</image>" );
                 char *psz_content = strchr( psz_subtitle, '>' );
                 int   i_transparent = -1;
 
@@ -921,10 +920,7 @@ static subpicture_region_t *ParseUSFString( decoder_t *p_dec,
             {
                 subpicture_region_t  *p_text_region;
 
-                if( psz_end )
-                    psz_end += strcspn( psz_end, ">" ) + 1;
-                else
-                    psz_end = psz_subtitle + strlen( psz_subtitle );
+                psz_end = psz_subtitle + strlen( psz_subtitle );
 
                 p_text_region = CreateTextRegion( p_dec,
                                                   psz_subtitle,

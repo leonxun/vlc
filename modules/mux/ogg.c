@@ -143,7 +143,7 @@ typedef struct
  *****************************************************************************/
 typedef struct
 {
-    int i_cat;
+    enum es_format_category_e i_cat;
     vlc_fourcc_t i_fourcc;
 
     int b_new;
@@ -278,7 +278,6 @@ static void Close( vlc_object_t * p_this )
 {
     sout_mux_t     *p_mux = (sout_mux_t*)p_this;
     sout_mux_sys_t *p_sys = p_mux->p_sys;
-    ogg_stream_t *p_stream;
 
     msg_Info( p_mux, "Close" );
 
@@ -287,20 +286,15 @@ static void Close( vlc_object_t * p_this )
         /* Close the current ogg stream */
         msg_Dbg( p_mux, "writing footers" );
 
-        for(int i = 0; i < p_mux->i_nb_inputs; i++ )
-        {
-            p_stream = (ogg_stream_t *) p_mux->pp_inputs[i]->p_sys;
-            OggCreateStreamFooter( p_mux, p_stream );
-            free( p_stream->skeleton.p_index );
-        }
-
         /* Remove deleted logical streams */
         for(int i = 0; i < p_sys->i_del_streams; i++ )
         {
-            OggCreateStreamFooter( p_mux, p_sys->pp_del_streams[i] );
-            free( p_sys->pp_del_streams[i]->p_oggds_header );
-            free( p_sys->pp_del_streams[i]->skeleton.p_index );
-            free( p_sys->pp_del_streams[i] );
+            ogg_stream_t *p_stream = p_sys->pp_del_streams[i];
+
+            OggCreateStreamFooter( p_mux, p_stream );
+            free( p_stream->p_oggds_header );
+            free( p_stream->skeleton.p_index );
+            free( p_stream );
         }
         free( p_sys->pp_del_streams );
         p_sys->i_streams -= p_sys->i_del_streams;
@@ -377,13 +371,15 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
     switch( p_input->p_fmt->i_cat )
     {
     case VIDEO_ES:
+    {
+        unsigned int i_frame_rate = p_input->p_fmt->video.i_frame_rate;
+        unsigned int i_frame_rate_base = p_input->p_fmt->video.i_frame_rate_base;
         if( !p_input->p_fmt->video.i_frame_rate ||
             !p_input->p_fmt->video.i_frame_rate_base )
         {
             msg_Warn( p_mux, "Missing frame rate, assuming 25fps" );
-            assert(p_input->p_fmt == &p_input->fmt);
-            p_input->fmt.video.i_frame_rate = 25;
-            p_input->fmt.video.i_frame_rate_base = 1;
+            i_frame_rate = 25;
+            i_frame_rate_base = 1;
         }
 
         switch( p_stream->i_fourcc )
@@ -421,8 +417,8 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             }
             p_stream->p_oggds_header->i_size = 0 ;
             p_stream->p_oggds_header->i_time_unit =
-                     INT64_C(10000000) * p_input->p_fmt->video.i_frame_rate_base /
-                     (int64_t)p_input->p_fmt->video.i_frame_rate;
+                     INT64_C(10000000) * i_frame_rate_base /
+                     (int64_t)i_frame_rate;
             p_stream->p_oggds_header->i_samples_per_unit = 1;
             p_stream->p_oggds_header->i_default_len = 1 ; /* ??? */
             p_stream->p_oggds_header->i_buffer_size = 1024*1024;
@@ -452,6 +448,7 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             FREENULL( p_input->p_sys );
             return VLC_EGENERIC;
         }
+    }
         break;
 
     case AUDIO_ES:

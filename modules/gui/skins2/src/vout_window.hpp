@@ -56,6 +56,9 @@ public:
 
     /// hotkeys processing
     virtual void processEvent( EvtKey &rEvtKey );
+    virtual void processEvent( EvtScroll &rEvtScroll );
+    virtual void processEvent( EvtMotion &rEvtMotion );
+    virtual void processEvent( EvtMouse &rEvtMouse );
 
     /// set and get Video Control for VoutWindow
     virtual void setCtrlVideo( CtrlVideo* pCtrlVideo );

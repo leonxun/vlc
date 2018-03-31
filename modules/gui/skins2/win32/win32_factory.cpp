@@ -233,10 +233,10 @@ bool Win32Factory::init()
     OleInitialize( NULL );
 
     // Initialize the resource path
-    char *datadir = config_GetUserDir( VLC_DATA_DIR );
+    char *datadir = config_GetUserDir( VLC_USERDATA_DIR );
     m_resourcePath.push_back( (std::string)datadir + "\\skins" );
     free( datadir );
-    datadir = config_GetDataDir();
+    datadir = config_GetSysPath(VLC_PKG_DATA_DIR, NULL);
     m_resourcePath.push_back( (std::string)datadir + "\\skins" );
     m_resourcePath.push_back( (std::string)datadir + "\\skins2" );
     m_resourcePath.push_back( (std::string)datadir + "\\share\\skins" );
@@ -464,15 +464,16 @@ void Win32Factory::changeCursor( CursorType_t type ) const
     LPCTSTR id;
     switch( type )
     {
-    default:
     case kDefaultArrow: id = IDC_ARROW;    break;
     case kResizeNWSE:   id = IDC_SIZENWSE; break;
     case kResizeNS:     id = IDC_SIZENS;   break;
     case kResizeWE:     id = IDC_SIZEWE;   break;
     case kResizeNESW:   id = IDC_SIZENESW; break;
+    case kNoCursor:
+    default: id = 0;
     }
 
-    HCURSOR hCurs = LoadCursor( NULL, id );
+    HCURSOR hCurs = (type == kNoCursor) ? NULL : LoadCursor( NULL, id );
     SetCursor( hCurs );
 }
 
@@ -482,7 +483,7 @@ void Win32Factory::rmDir( const std::string &rPath )
     LPWSTR dir_temp = ToWide( rPath.c_str() );
     size_t len = wcslen( dir_temp );
 
-    LPWSTR dir = (wchar_t *)malloc( (len + 2) * sizeof (wchar_t) );
+    LPWSTR dir = (wchar_t *)vlc_alloc( len + 2, sizeof (wchar_t) );
     wcsncpy( dir, dir_temp, len + 2);
 
     SHFILEOPSTRUCTW file_op = {

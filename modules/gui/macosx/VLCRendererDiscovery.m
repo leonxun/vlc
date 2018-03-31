@@ -32,9 +32,10 @@
 {
     intf_thread_t               *p_intf;
     vlc_renderer_discovery_t    *p_rd;
+    BOOL                        _isRunning;
 }
 
-- (void)handleItemAdded:(const vlc_renderer_item_t *)item;
+- (void)handleItemAdded:(vlc_renderer_item_t *)item;
 - (void)handleItemRemoved:(const vlc_renderer_item_t *)item;
 @end
 
@@ -65,6 +66,7 @@ static void renderer_event_item_removed(vlc_renderer_discovery_t *rd,
                         format:@"name must not be nil"];
         _name = [NSString stringWithUTF8String:name];
         _longName = (!longname) ? nil : [NSString stringWithUTF8String:longname];
+        _rendererItems = [NSMutableArray array];
     }
     return self;
 }
@@ -76,6 +78,10 @@ static void renderer_event_item_removed(vlc_renderer_discovery_t *rd,
 
 - (bool)startDiscovery
 {
+    if (_isRunning) {
+        return YES;
+    }
+
     struct vlc_renderer_discovery_owner owner =
     {
         (__bridge void *) self,
@@ -90,10 +96,12 @@ static void renderer_event_item_removed(vlc_renderer_discovery_t *rd,
     p_rd = vlc_rd_new(VLC_OBJECT(p_intf), _name.UTF8String, &owner);
 
     if (!p_rd) {
+        _isRunning = NO;
         msg_Err(p_intf, "Could not create '%s' renderer discovery service", _name.UTF8String);
         return false;
     }
 
+    _isRunning = YES;
     return true;
 }
 
@@ -102,10 +110,11 @@ static void renderer_event_item_removed(vlc_renderer_discovery_t *rd,
     if (p_rd != NULL) {
         vlc_rd_release(p_rd);
         p_rd = NULL;
+        _isRunning = NO;
     }
 }
 
-- (void)handleItemAdded:(const vlc_renderer_item_t *)base_item
+- (void)handleItemAdded:(vlc_renderer_item_t *)base_item
 {
     VLCRendererItem *item = [[VLCRendererItem alloc] initWithRendererItem:base_item];
     [_rendererItems addObject:item];
@@ -119,13 +128,13 @@ static void renderer_event_item_removed(vlc_renderer_discovery_t *rd,
     for (VLCRendererItem *item in _rendererItems) {
         if (item.rendererItem == base_item) {
             result_item = item;
-            return;
+            break;
         }
     }
     if (result_item) {
-        [_rendererItems removeObject:result_item];
         if (_delegate)
             [_delegate removedRendererItem:result_item from:self];
+        [_rendererItems removeObject:result_item];
     } else {
         msg_Err(p_intf, "VLCRendererDiscovery could not find item to remove!");
     }

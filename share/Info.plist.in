@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
+	<key>CFBundleAllowMixedLocalizations</key>
+	<true/>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -1042,16 +1044,16 @@
 			</array>
 		</dict>
 		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>mkv</string>
+			</array>
 			<key>CFBundleTypeIconFile</key>
 			<string>mkv.icns</string>
 			<key>CFBundleTypeName</key>
 			<string>Matroska Video File</string>
 			<key>CFBundleTypeRole</key>
 			<string>Viewer</string>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>org.matroska.mkv</string>
-			</array>
 		</dict>
 		<dict>
 			<key>CFBundleTypeExtensions</key>
@@ -1389,13 +1391,13 @@
 	<key>CFBundleSignature</key>
 	<string>VLC#</string>
 	<key>BreakpadProduct</key>
-	<string>VLC-macOS</string>
+	<string>VLC</string>
 	<key>BreakpadVendor</key>
 	<string>VideoLAN</string>
 	<key>BreakpadRequestComments</key>
 	<string>1</string>
 	<key>BreakpadURL</key>
-	<string>https://crashes.videolan.org/crashreports</string>
+	<string>@BREAKPAD_URL@/reports</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -1501,7 +1503,7 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.video</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>10.6.0</string>
+	<string>10.10.0</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

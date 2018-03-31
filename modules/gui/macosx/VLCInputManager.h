@@ -32,13 +32,14 @@
 @interface VLCInputManager : NSObject
 
 - (id)initWithMain:(VLCMain *)o_mainObj;
+- (void)deinit;
 
 - (void)inputThreadChanged;
 
 - (void)playbackStatusUpdated;
 - (void)playbackPositionUpdated;
 
-- (void)resumeItunesPlayback:(id)sender;
+- (void)onPlaybackHasEnded:(id)sender;
 
 - (BOOL)hasInput;
 

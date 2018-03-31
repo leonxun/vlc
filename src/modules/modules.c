@@ -155,15 +155,17 @@ void module_stop (vlc_object_t *obj, const module_t *m)
         deactivate (obj);
 }
 
-static bool module_match_name (const module_t *m, const char *name)
+static bool module_match_name(const module_t *m, const char *name, size_t len)
 {
      /* Plugins with zero score must be matched explicitly. */
-     if (!strcasecmp ("any", name))
+     if (len == 3 && strncasecmp("any", name, len) == 0)
          return m->i_score > 0;
 
-     for (unsigned i = 0; i < m->i_shortcuts; i++)
-          if (!strcasecmp (m->pp_shortcuts[i], name))
+     for (size_t i = 0; i < m->i_shortcuts; i++)
+          if (strncasecmp(m->pp_shortcuts[i], name, len) == 0
+           && m->pp_shortcuts[i][len] == '\0')
               return true;
+
      return false;
 }
 
@@ -183,6 +185,10 @@ static int module_load (vlc_object_t *obj, module_t *m,
         ret = init (m->pf_activate, ap);
         va_end (ap);
     }
+
+    if (ret != VLC_SUCCESS)
+        vlc_objres_clear(obj);
+
     return ret;
 }
 
@@ -211,17 +217,8 @@ module_t *vlc_module_load(vlc_object_t *obj, const char *capability,
                           const char *name, bool strict,
                           vlc_activate_t probe, ...)
 {
-    char *var = NULL;
-
     if (name == NULL || name[0] == '\0')
         name = "any";
-
-    /* Deal with variables */
-    if (name[0] == '$')
-    {
-        var = var_InheritString (obj, name + 1);
-        name = (var != NULL) ? var : "any";
-    }
 
     /* Find matching modules */
     module_t **mods;
@@ -243,21 +240,11 @@ module_t *vlc_module_load(vlc_object_t *obj, const char *capability,
     va_start(args, probe);
     while (*name)
     {
-        char buf[32];
+        const char *shortcut = name;
         size_t slen = strcspn (name, ",");
 
-        if (likely(slen < sizeof (buf)))
-        {
-            memcpy(buf, name, slen);
-            buf[slen] = '\0';
-        }
         name += slen;
         name += strspn (name, ",");
-        if (unlikely(slen >= sizeof (buf)))
-            continue;
-
-        const char *shortcut = buf;
-        assert (shortcut != NULL);
 
         if (!strcasecmp ("none", shortcut))
             goto done;
@@ -268,7 +255,7 @@ module_t *vlc_module_load(vlc_object_t *obj, const char *capability,
             module_t *cand = mods[i];
             if (cand == NULL)
                 continue; // module failed in previous iteration
-            if (!module_match_name (cand, shortcut))
+            if (!module_match_name(cand, shortcut, slen))
                 continue;
             mods[i] = NULL; // only try each module once at most...
 
@@ -309,7 +296,6 @@ done:
     va_end (args);
     obj->obj.force = b_force_backup;
     module_list_free (mods);
-    free (var);
 
     if (module != NULL)
     {
@@ -322,13 +308,14 @@ done:
     return module;
 }
 
-
+#undef vlc_module_unload
 /**
  * Deinstantiates a module.
  * \param module the module pointer as returned by vlc_module_load()
  * \param deinit deactivation callback
  */
-void vlc_module_unload(module_t *module, vlc_deactivate_t deinit, ...)
+void vlc_module_unload(vlc_object_t *obj, module_t *module,
+                       vlc_deactivate_t deinit, ...)
 {
     if (module->pf_deactivate != NULL)
     {
@@ -338,6 +325,8 @@ void vlc_module_unload(module_t *module, vlc_deactivate_t deinit, ...)
         deinit(module->pf_deactivate, ap);
         va_end(ap);
     }
+
+    vlc_objres_clear(obj);
 }
 
 
@@ -368,7 +357,7 @@ module_t *module_need(vlc_object_t *obj, const char *cap, const char *name,
 void module_unneed(vlc_object_t *obj, module_t *module)
 {
     msg_Dbg(obj, "removing module \"%s\"", module_get_object(module));
-    vlc_module_unload(module, generic_stop, obj);
+    vlc_module_unload(obj, module, generic_stop, obj);
 }
 
 /**
@@ -431,7 +420,7 @@ module_config_t *module_config_get( const module_t *module, unsigned *restrict p
 
     unsigned i,j;
     size_t size = plugin->conf.size;
-    module_config_t *config = malloc( size * sizeof( *config ) );
+    module_config_t *config = vlc_alloc( size, sizeof( *config ) );
 
     assert( psize != NULL );
     *psize = 0;

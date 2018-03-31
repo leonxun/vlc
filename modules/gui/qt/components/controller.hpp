@@ -126,15 +126,15 @@ static const char* const tooltipL[BUTTON_MAX] = { I_PLAY_TOOLTIP,
     N_("Open subtitle file"),
     N_("Dock/undock fullscreen controller to/from bottom of screen"),
 };
-static const QString iconL[BUTTON_MAX] ={ ":/toolbar/play_b", ":/toolbar/stop_b",
-    ":/toolbar/eject", ":/toolbar/previous_b", ":/toolbar/next_b",
-    ":/toolbar/slower", ":/toolbar/faster", ":/toolbar/fullscreen",
-    ":/toolbar/defullscreen", ":/toolbar/extended", ":/toolbar/playlist",
-    ":/toolbar/snapshot", ":/toolbar/record", ":/toolbar/atob_nob",
-    ":/toolbar/frame", ":/toolbar/reverse", ":/toolbar/skip_back",
-    ":/toolbar/skip_fw", ":/toolbar/clear", ":/buttons/playlist/shuffle_on",
-    ":/buttons/playlist/repeat_all", ":/menu/info",
-    ":/toolbar/previous_b", ":/toolbar/next_b", ":/toolbar/eject", ":/toolbar/space"
+static const QString iconL[BUTTON_MAX] ={ ":/toolbar/play_b.svg", ":/toolbar/stop_b.svg",
+    ":/toolbar/eject.svg", ":/toolbar/previous_b.svg", ":/toolbar/next_b.svg",
+    ":/toolbar/slower.svg", ":/toolbar/faster.svg", ":/toolbar/fullscreen.svg",
+    ":/toolbar/defullscreen.svg", ":/toolbar/extended.svg", ":/toolbar/playlist.svg",
+    ":/toolbar/snapshot.svg", ":/toolbar/record.svg", ":/toolbar/atob_nob.svg",
+    ":/toolbar/frame.svg", ":/toolbar/reverse.svg", ":/toolbar/skip_back.svg",
+    ":/toolbar/skip_fw.svg", ":/toolbar/clear.svg", ":/buttons/playlist/shuffle_on.svg",
+    ":/buttons/playlist/repeat_all.svg", ":/menu/info.svg",
+    ":/toolbar/previous_b.svg", ":/toolbar/next_b.svg", ":/toolbar/eject.svg", ":/toolbar/space.svg"
 };
 
 enum
@@ -229,12 +229,6 @@ signals:
     void advancedControlsToggled( bool );
 };
 
-
-/* to trying transparency with fullscreen controller on windows enable that */
-/* it can be enabled on-non windows systems,
-   but it will be transparent only with composite manager */
-#define HAVE_TRANSPARENCY 1
-
 /* Default value of opacity for FS controller */
 #define DEFAULT_OPACITY 0.70
 
@@ -257,6 +251,7 @@ public:
     void toggleFullwidth();
     void updateFullwidthGeometry( int number );
     int targetScreen();
+    void setTargetScreen( int );
 
 private:
     static int FullscreenChanged( vlc_object_t *obj,
@@ -291,12 +286,10 @@ private slots:
 
 private:
     QTimer *p_hideTimer;
-#if HAVE_TRANSPARENCY
     QTimer *p_slowHideTimer;
     bool b_slow_hide_begin;
     int  i_slow_hide_timeout;
     float f_opacity;
-#endif
 
     int i_mouse_last_x, i_mouse_last_y;
     bool b_mouse_over;
@@ -317,6 +310,10 @@ private:
 
     bool isWideFSC;
     int i_sensitivity;
+
+#ifdef QT5_HAS_WAYLAND
+    bool b_hasWayland;
+#endif
 };
 
 #endif

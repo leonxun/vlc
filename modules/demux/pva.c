@@ -128,8 +128,8 @@ static void Close( vlc_object_t *p_this )
     demux_t     *p_demux = (demux_t*)p_this;
     demux_sys_t *p_sys = p_demux->p_sys;
 
-    if( p_sys->p_es )  block_ChainRelease( p_sys->p_es );
-    if( p_sys->p_pes ) block_ChainRelease( p_sys->p_pes );
+    block_ChainRelease( p_sys->p_es );
+    block_ChainRelease( p_sys->p_pes );
 
     free( p_sys );
 }
@@ -217,8 +217,12 @@ static int Demux( demux_t *p_demux )
 
                     if( p_frame->i_pts > VLC_TS_INVALID && !p_sys->b_pcr_audio )
                     {
-                        es_out_Control( p_demux->out, ES_OUT_SET_PCR, (int64_t)p_frame->i_pts);
+                        es_out_SetPCR( p_demux->out, p_frame->i_pts);
                     }
+
+                    p_frame = block_ChainGather( p_frame );
+                    if( unlikely(p_frame == NULL) )
+                        abort();
                     es_out_Send( p_demux->out, p_sys->p_video, p_frame );
 
                     p_sys->p_es = NULL;
@@ -274,7 +278,8 @@ static int Demux( demux_t *p_demux )
 
         default:
             msg_Warn( p_demux, "unknown id=0x%x", p_peek[2] );
-            vlc_stream_Read( p_demux->s, NULL, i_size + 8 );
+            if( vlc_stream_Read( p_demux->s, NULL, i_size + 8 ) < i_size + 8 )
+                return 0;
             break;
     }
     return 1;
@@ -341,6 +346,12 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             *pf = (double)1000000.0 / (double)p_sys->i_pcr_inc;
             return VLC_SUCCESS;
 #endif
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
+
         case DEMUX_SET_TIME:
         default:
             return VLC_EGENERIC;
@@ -428,6 +439,8 @@ static void ParsePES( demux_t *p_demux )
     }
 
     p_pes = block_ChainGather( p_pes );
+    if( unlikely(p_pes == NULL) )
+        abort();
     if( p_pes->i_buffer <= i_skip )
     {
         block_ChainRelease( p_pes );
@@ -445,7 +458,7 @@ static void ParsePES( demux_t *p_demux )
     /* Set PCR */
     if( p_pes->i_pts > 0 )
     {
-        es_out_Control( p_demux->out, ES_OUT_SET_PCR, (int64_t)p_pes->i_pts);
+        es_out_SetPCR( p_demux->out, p_pes->i_pts);
         p_sys->b_pcr_audio = true;
     }
     es_out_Send( p_demux->out, p_sys->p_audio, p_pes );

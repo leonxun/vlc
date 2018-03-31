@@ -33,9 +33,9 @@ OPTIONS="
         --disable-xcb
         --disable-caca
         --disable-pulse
-        --disable-sdl
+        --disable-sdl-image
         --disable-vnc
-        --with-macosx-version-min=10.7
+        --with-macosx-version-min=10.10
 "
 
 export CFLAGS

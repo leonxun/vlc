@@ -45,7 +45,6 @@ struct AWindowHandler
     ptr_ANativeWindow_fromSurface pf_winFromSurface;
     ptr_ANativeWindow_release pf_winRelease;
     native_window_api_t anw_api;
-    native_window_priv_api_t anwpriv_api;
 
     struct {
         awh_events_t cb;
@@ -80,7 +79,6 @@ static struct
         jmethodID getSubtitlesSurface;
         jmethodID registerNative;
         jmethodID unregisterNative;
-        jmethodID setBuffersGeometry;
         jmethodID setVideoLayout;
     } AndroidNativeWindow;
     struct {
@@ -298,36 +296,6 @@ LoadNativeWindowAPI(AWindowHandler *p_awh)
 }
 
 /*
- * Android private NativeWindow (post android 2.3)
- */
-
-int
-android_loadNativeWindowPrivApi(native_window_priv_api_t *native)
-{
-#define LOAD(symbol) do { \
-if ((native->symbol = dlsym(RTLD_DEFAULT, "ANativeWindowPriv_" #symbol)) == NULL) \
-    return -1; \
-} while(0)
-    LOAD(connect);
-    LOAD(disconnect);
-    LOAD(setUsage);
-    LOAD(setBuffersGeometry);
-    LOAD(getMinUndequeued);
-    LOAD(getMaxBufferCount);
-    LOAD(setBufferCount);
-    LOAD(setCrop);
-    LOAD(dequeue);
-    LOAD(lock);
-    LOAD(lockData);
-    LOAD(unlockData);
-    LOAD(queue);
-    LOAD(cancel);
-    LOAD(setOrientation);
-    return 0;
-#undef LOAD
-}
-
-/*
  * Andoid JNIEnv helper
  */
 
@@ -455,8 +423,6 @@ InitJNIFields(JNIEnv *env, vlc_object_t *p_obj, jobject *jobj)
                "registerNative", "(J)I", true);
     GET_METHOD(AndroidNativeWindow.unregisterNative,
                "unregisterNative", "()V", true);
-    GET_METHOD(AndroidNativeWindow.setBuffersGeometry,
-               "setBuffersGeometry", "(Landroid/view/Surface;III)Z", true);
     GET_METHOD(AndroidNativeWindow.setVideoLayout,
                "setVideoLayout", "(IIIIII)V", true);
 
@@ -714,24 +680,6 @@ AndroidNativeWindow_onWindowSize(JNIEnv* env, jobject clazz, jlong handle,
 
     if (width >= 0 && height >= 0)
         p_awh->event.cb.on_new_window_size(p_awh->wnd, width, height);
-}
-
-int
-AWindowHandler_setBuffersGeometry(AWindowHandler *p_awh, enum AWindow_ID id,
-                                  int i_width, int i_height, int i_format)
-{
-    jobject jsurf;
-    JNIEnv *p_env = AWindowHandler_getEnv(p_awh);
-    if (!p_env)
-        return VLC_EGENERIC;
-
-    jsurf = AWindowHandler_getSurface(p_awh, id);
-    if (!jsurf)
-        return VLC_EGENERIC;
-
-    return JNI_ANWCALL(CallBooleanMethod, setBuffersGeometry,
-                       jsurf, i_width, i_height, i_format) ? VLC_SUCCESS
-                                                           : VLC_EGENERIC;
 }
 
 bool

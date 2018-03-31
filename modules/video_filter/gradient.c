@@ -351,7 +351,7 @@ static void FilterGradient( filter_t *p_filter, picture_t *p_inpic,
     uint32_t *p_smooth;
     if( !p_filter->p_sys->p_buf32 )
         p_filter->p_sys->p_buf32 =
-        (uint32_t *)malloc( i_num_lines * i_src_visible * sizeof(uint32_t));
+            vlc_alloc( i_num_lines * i_src_visible, sizeof(uint32_t));
     p_smooth = p_filter->p_sys->p_buf32;
 
     if( !p_smooth ) return;
@@ -382,26 +382,20 @@ static void FilterGradient( filter_t *p_filter, picture_t *p_inpic,
     {                                                           \
         for( int x = 1; x < i_src_visible - 1; x++ )            \
         {                                                       \
-            const uint32_t a =                                  \
-            (                                                   \
-              abs(                                              \
-                 ( p_smooth[(y-1)*i_src_visible+x-1]            \
-                   - p_smooth[(y+1)*i_src_visible+x-1] )        \
-               + ( ( p_smooth[(y-1)*i_src_visible+x]            \
-                    - p_smooth[(y+1)*i_src_visible+x] ) <<1 )   \
-               + ( p_smooth[(y-1)*i_src_visible+x+1]            \
-                   - p_smooth[(y+1)*i_src_visible+x+1] )        \
-              )                                                 \
-            +                                                   \
-              abs(                                              \
-                 ( p_smooth[(y-1)*i_src_visible+x-1]            \
-                   - p_smooth[(y-1)*i_src_visible+x+1] )        \
-               + ( ( p_smooth[y*i_src_visible+x-1]              \
-                    - p_smooth[y*i_src_visible+x+1] ) <<1 )     \
-               + ( p_smooth[(y+1)*i_src_visible+x-1]            \
-                   - p_smooth[(y+1)*i_src_visible+x+1] )        \
-              )                                                 \
-            );
+            const uint32_t a = \
+                  abs(((int)p_smooth[(y - 1) * i_src_visible + x - 1] \
+                     - (int)p_smooth[(y + 1) * i_src_visible + x - 1]) \
+                   + (((int)p_smooth[(y - 1) * i_src_visible + x] \
+                     - (int)p_smooth[(y + 1) * i_src_visible + x]) * 2) \
+                    + ((int)p_smooth[(y - 1) * i_src_visible + x + 1] \
+                     - (int)p_smooth[(y + 1) * i_src_visible + x + 1])) \
+                + abs(((int)p_smooth[(y - 1) * i_src_visible + x - 1] \
+                     - (int)p_smooth[(y - 1) * i_src_visible + x + 1]) \
+                   + (((int)p_smooth[y       * i_src_visible + x - 1] \
+                     - (int)p_smooth[y       * i_src_visible + x + 1]) * 2) \
+                    + ((int)p_smooth[(y + 1) * i_src_visible + x - 1] \
+                     - (int)p_smooth[(y + 1) * i_src_visible + x + 1]));
+
     if( p_filter->p_sys->i_gradient_type )
     {
         if( p_filter->p_sys->b_cartoon )
@@ -479,17 +473,17 @@ static void FilterEdge( filter_t *p_filter, picture_t *p_inpic,
 
     if( !p_filter->p_sys->p_buf32 )
         p_filter->p_sys->p_buf32 =
-        (uint32_t *)malloc( i_num_lines * i_src_visible * sizeof(uint32_t));
+            vlc_alloc( i_num_lines * i_src_visible, sizeof(uint32_t));
     p_smooth = p_filter->p_sys->p_buf32;
 
     if( !p_filter->p_sys->p_buf32_bis )
         p_filter->p_sys->p_buf32_bis =
-        (uint32_t *)malloc( i_num_lines * i_src_visible * sizeof(uint32_t));
+            vlc_alloc( i_num_lines * i_src_visible, sizeof(uint32_t));
     p_grad = p_filter->p_sys->p_buf32_bis;
 
     if( !p_filter->p_sys->p_buf8 )
         p_filter->p_sys->p_buf8 =
-        (uint8_t *)malloc( i_num_lines * i_src_visible * sizeof(uint8_t));
+            vlc_alloc( i_num_lines * i_src_visible, sizeof(uint8_t));
     p_theta = p_filter->p_sys->p_buf8;
 
     if( !p_smooth || !p_grad || !p_theta ) return;
@@ -638,10 +632,10 @@ static void FilterHough( filter_t *p_filter, picture_t *p_inpic,
     double d_cos;
     uint32_t *p_smooth;
 
-    int *p_hough = malloc( i_diag * i_nb_steps * sizeof(int) );
+    int *p_hough = vlc_alloc( i_diag * i_nb_steps, sizeof(int) );
     if( ! p_hough ) return;
 
-    p_smooth = (uint32_t *)malloc( i_num_lines*i_src_visible*sizeof(uint32_t));
+    p_smooth = vlc_alloc( i_num_lines * i_src_visible, sizeof(uint32_t));
     if( !p_smooth )
     {
         free( p_hough );
@@ -651,7 +645,7 @@ static void FilterHough( filter_t *p_filter, picture_t *p_inpic,
     if( ! p_pre_hough )
     {
         msg_Dbg(p_filter, "Starting precalculation");
-        p_pre_hough = malloc( i_num_lines*i_src_visible*i_nb_steps*sizeof(int));
+        p_pre_hough = vlc_alloc( i_num_lines*i_src_visible*i_nb_steps,sizeof(int));
         if( ! p_pre_hough )
         {
             free( p_smooth );
@@ -694,25 +688,18 @@ static void FilterHough( filter_t *p_filter, picture_t *p_inpic,
         for( int x = 4; x < i_src_visible - 4; x++ )
         {
             uint32_t a =
-            (
-              abs(
-                ( ( p_smooth[(y-1)*i_src_visible+x]
-                    - p_smooth[(y+1)*i_src_visible+x] ) <<1 )
-               + ( p_smooth[(y-1)*i_src_visible+x-1]
-                   - p_smooth[(y+1)*i_src_visible+x-1] )
-               + ( p_smooth[(y-1)*i_src_visible+x+1]
-                   - p_smooth[(y+1)*i_src_visible+x+1] )
-              )
-            +
-              abs(
-                ( ( p_smooth[y*i_src_visible+x-1]
-                    - p_smooth[y*i_src_visible+x+1] ) <<1 )
-               + ( p_smooth[(y-1)*i_src_visible+x-1]
-                   - p_smooth[(y-1)*i_src_visible+x+1] )
-               + ( p_smooth[(y+1)*i_src_visible+x-1]
-                   - p_smooth[(y+1)*i_src_visible+x+1] )
-              )
-            );
+                  abs((((int)p_smooth[(y - 1) * i_src_visible + x]
+                      - (int)p_smooth[(y + 1) * i_src_visible + x]) * 2)
+                     + ((int)p_smooth[(y - 1) * i_src_visible + x - 1]
+                      - (int)p_smooth[(y + 1) * i_src_visible + x - 1])
+                     + ((int)p_smooth[(y - 1) * i_src_visible + x + 1]
+                      - (int)p_smooth[(y + 1) * i_src_visible + x + 1]))
+                + abs((((int)p_smooth[y * i_src_visible + x - 1]
+                      - (int)p_smooth[y * i_src_visible + x + 1]) * 2)
+                     + ((int)p_smooth[(y - 1) * i_src_visible + x - 1]
+                      - (int)p_smooth[(y - 1) * i_src_visible + x + 1])
+                     + ((int)p_smooth[(y + 1) * i_src_visible + x - 1]
+                      - (int)p_smooth[(y + 1) * i_src_visible + x + 1]));
             if( a>>8 )
             {
                 for( int i = 0; i < i_nb_steps; i++ )

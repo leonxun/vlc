@@ -84,7 +84,7 @@ static int IOWriteTyped(void *opaque, uint8_t *buf, int buf_size,
 /*****************************************************************************
  * Open
  *****************************************************************************/
-int OpenMux( vlc_object_t *p_this )
+int avformat_OpenMux( vlc_object_t *p_this )
 {
     AVOutputFormat *file_oformat;
     sout_mux_t *p_mux = (sout_mux_t*)p_this;
@@ -163,7 +163,7 @@ int OpenMux( vlc_object_t *p_this )
 /*****************************************************************************
  * Close
  *****************************************************************************/
-void CloseMux( vlc_object_t *p_this )
+void avformat_CloseMux( vlc_object_t *p_this )
 {
     sout_mux_t *p_mux = (sout_mux_t*)p_this;
     sout_mux_sys_t *p_sys = p_mux->p_sys;
@@ -186,14 +186,12 @@ void CloseMux( vlc_object_t *p_this )
 static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
 {
     sout_mux_sys_t *p_sys = p_mux->p_sys;
-    es_format_t *fmt = &p_input->fmt;
-    AVCodecContext *codec;
-    AVStream *stream;
+    const es_format_t *fmt = p_input->p_fmt;
     unsigned i_codec_id;
 
     msg_Dbg( p_mux, "adding input" );
 
-    if( !GetFfmpegCodec( fmt->i_codec, 0, &i_codec_id, 0 )
+    if( !GetFfmpegCodec( fmt->i_cat, fmt->i_codec, &i_codec_id, NULL )
      || i_codec_id == AV_CODEC_ID_NONE )
     {
         msg_Dbg( p_mux, "couldn't find codec for fourcc '%4.4s'",
@@ -215,6 +213,10 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
             return VLC_EGENERIC;
         }
     }
+    else if( fmt->i_codec == VLC_CODEC_MPGA && fmt->i_profile == 3 )
+    {
+        i_codec_id = AV_CODEC_ID_MP3;
+    }
 
     if( fmt->i_cat != VIDEO_ES && fmt->i_cat != AUDIO_ES)
     {
@@ -230,85 +232,92 @@ static int AddStream( sout_mux_t *p_mux, sout_input_t *p_input )
     *((int *)p_input->p_sys) = p_sys->oc->nb_streams;
 
     /* */
-    stream = avformat_new_stream( p_sys->oc, NULL);
+    AVStream *stream = avformat_new_stream( p_sys->oc, NULL);
     if( !stream )
     {
         free( p_input->p_sys );
         return VLC_EGENERIC;
     }
-    codec = stream->codec;
 
-    codec->opaque = p_mux;
+#if (LIBAVFORMAT_VERSION_INT >= AV_VERSION_INT(57, 5, 0))
+    AVCodecParameters *codecpar = stream->codecpar;
+#else
+    AVCodecContext *codecpar = stream->codec;
+#endif
 
+    unsigned int i_bitrate = fmt->i_bitrate;
+    unsigned int i_frame_rate = fmt->video.i_frame_rate;
+    unsigned int i_frame_rate_base = fmt->video.i_frame_rate_base;
     switch( fmt->i_cat )
     {
     case AUDIO_ES:
-        codec->codec_type = AVMEDIA_TYPE_AUDIO;
-        codec->channels = fmt->audio.i_channels;
-        codec->sample_rate = fmt->audio.i_rate;
-        stream->time_base = (AVRational){1, codec->sample_rate};
-        codec->frame_size = fmt->audio.i_frame_length;
+        codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+        codecpar->channels = fmt->audio.i_channels;
+        codecpar->sample_rate = fmt->audio.i_rate;
+        stream->time_base = (AVRational){1, codecpar->sample_rate};
         if (fmt->i_bitrate == 0) {
             msg_Warn( p_mux, "Missing audio bitrate, assuming 64k" );
-            fmt->i_bitrate = 64000;
+            i_bitrate = 64000;
         }
         break;
 
     case VIDEO_ES:
         if( !fmt->video.i_frame_rate || !fmt->video.i_frame_rate_base ) {
             msg_Warn( p_mux, "Missing frame rate, assuming 25fps" );
-            fmt->video.i_frame_rate = 25;
-            fmt->video.i_frame_rate_base = 1;
+            i_frame_rate = 25;
+            i_frame_rate_base = 1;
         } else
             msg_Dbg( p_mux, "Muxing framerate will be %d/%d = %.2f fps",
                     fmt->video.i_frame_rate,
                     fmt->video.i_frame_rate_base,
                     (double)fmt->video.i_frame_rate/(double)fmt->video.i_frame_rate_base );
 
-        codec->codec_type = AVMEDIA_TYPE_VIDEO;
-        codec->width = fmt->video.i_visible_width;
-        codec->height = fmt->video.i_visible_height;
-        av_reduce( &codec->sample_aspect_ratio.num,
-                   &codec->sample_aspect_ratio.den,
+        codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+        codecpar->width = fmt->video.i_visible_width;
+        codecpar->height = fmt->video.i_visible_height;
+        av_reduce( &codecpar->sample_aspect_ratio.num,
+                   &codecpar->sample_aspect_ratio.den,
                    fmt->video.i_sar_num,
                    fmt->video.i_sar_den, 1 << 30 /* something big */ );
         msg_Dbg(p_mux, "Muxing aspect ratio will be %d/%d",
                 fmt->video.i_sar_num, fmt->video.i_sar_den);
-        stream->sample_aspect_ratio.den = codec->sample_aspect_ratio.den;
-        stream->sample_aspect_ratio.num = codec->sample_aspect_ratio.num;
-        stream->time_base.den = fmt->video.i_frame_rate;
-        stream->time_base.num = fmt->video.i_frame_rate_base;
+        stream->sample_aspect_ratio.den = codecpar->sample_aspect_ratio.den;
+        stream->sample_aspect_ratio.num = codecpar->sample_aspect_ratio.num;
+        stream->time_base.den = i_frame_rate;
+        stream->time_base.num = i_frame_rate_base;
         if (fmt->i_bitrate == 0) {
             msg_Warn( p_mux, "Missing video bitrate, assuming 512k" );
-            fmt->i_bitrate = 512000;
+            i_bitrate = 512000;
         } else
             msg_Dbg( p_mux, "Muxing video bitrate will be %d", fmt->i_bitrate );
         break;
 
+    default:
+        vlc_assert_unreachable();
     }
 
-    codec->bit_rate = fmt->i_bitrate;
-    codec->codec_tag = av_codec_get_tag( p_sys->oc->oformat->codec_tag, i_codec_id );
-    if( !codec->codec_tag && i_codec_id == AV_CODEC_ID_MP2 )
+    codecpar->bit_rate = i_bitrate;
+    codecpar->codec_tag = av_codec_get_tag( p_sys->oc->oformat->codec_tag, i_codec_id );
+    if( !codecpar->codec_tag && i_codec_id == AV_CODEC_ID_MP2 )
     {
         i_codec_id = AV_CODEC_ID_MP3;
-        codec->codec_tag = av_codec_get_tag( p_sys->oc->oformat->codec_tag, i_codec_id );
+        codecpar->codec_tag = av_codec_get_tag( p_sys->oc->oformat->codec_tag, i_codec_id );
     }
-    codec->codec_id = i_codec_id;
+    codecpar->codec_id = i_codec_id;
 
     if( fmt->i_extra )
     {
         if( fmt->i_codec == VLC_CODEC_OPUS )
         {
-            codec->extradata_size = opus_size[0];
-            codec->extradata = av_malloc( opus_size[0] );
-            memcpy( codec->extradata, opus_packet[0], opus_size[0] );
+            codecpar->extradata_size = opus_size[0];
+            codecpar->extradata = av_malloc( opus_size[0] );
+            memcpy( codecpar->extradata, opus_packet[0], opus_size[0] );
         }
         else
         {
-            codec->extradata_size = fmt->i_extra;
-            codec->extradata = av_malloc( fmt->i_extra );
-            memcpy( codec->extradata, fmt->p_extra, fmt->i_extra );
+            codecpar->extradata_size = fmt->i_extra;
+            codecpar->extradata = av_malloc( fmt->i_extra );
+            memcpy( codecpar->extradata, fmt->p_extra, fmt->i_extra );
         }
     }
 

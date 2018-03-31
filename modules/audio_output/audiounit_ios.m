@@ -25,7 +25,6 @@
 #import "coreaudio_common.h"
 
 #import <vlc_plugin.h>
-#import <vlc_memory.h>
 
 #import <CoreAudio/CoreAudioTypes.h>
 #import <Foundation/Foundation.h>
@@ -87,15 +86,24 @@ struct aout_sys_t
     /* The AudioUnit we use */
     AudioUnit au_unit;
     bool      b_muted;
+    bool      b_paused;
     bool      b_preferred_channels_set;
     enum au_dev au_dev;
+
+    /* sw gain */
+    float               soft_gain;
+    bool                soft_mute;
 };
+
+/* Soft volume helper */
+#include "audio_output/volume.h"
 
 enum port_type
 {
     PORT_TYPE_DEFAULT,
     PORT_TYPE_USB,
-    PORT_TYPE_HDMI
+    PORT_TYPE_HDMI,
+    PORT_TYPE_HEADPHONES
 };
 
 #pragma mark -
@@ -125,6 +133,23 @@ enum port_type
         aout_RestartRequest(p_aout, AOUT_RESTART_OUTPUT);
 }
 
+- (void)handleInterruption:(NSNotification *)notification
+{
+    audio_output_t *p_aout = [self aout];
+    NSDictionary *userInfo = notification.userInfo;
+    if (!userInfo || !userInfo[AVAudioSessionInterruptionTypeKey]) {
+        return;
+    }
+
+    NSUInteger interruptionType = [userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue];
+
+    if (interruptionType == AVAudioSessionInterruptionTypeBegan) {
+        ca_SetAliveState(p_aout, false);
+    } else if (interruptionType == AVAudioSessionInterruptionTypeEnded
+               && [userInfo[AVAudioSessionInterruptionOptionKey] unsignedIntegerValue] == AVAudioSessionInterruptionOptionShouldResume) {
+        ca_SetAliveState(p_aout, true);
+    }
+}
 @end
 
 static void
@@ -189,6 +214,8 @@ avas_GetOptimalChannelLayout(audio_output_t *p_aout, enum port_type *pport_type,
             port_type = PORT_TYPE_USB;
         else if ([out.portType isEqualToString: AVAudioSessionPortHDMI])
             port_type = PORT_TYPE_HDMI;
+        else if ([out.portType isEqualToString: AVAudioSessionPortHeadphones])
+            port_type = PORT_TYPE_HEADPHONES;
         else
             port_type = PORT_TYPE_DEFAULT;
 
@@ -245,7 +272,8 @@ avas_GetOptimalChannelLayout(audio_output_t *p_aout, enum port_type *pport_type,
 
     msg_Dbg(p_aout, "Output on %s, channel count: %u",
             *pport_type == PORT_TYPE_HDMI ? "HDMI" :
-            *pport_type == PORT_TYPE_USB ? "USB" : "Default",
+            *pport_type == PORT_TYPE_USB ? "USB" :
+            *pport_type == PORT_TYPE_HEADPHONES ? "Headphones" : "Default",
             layout ? (unsigned) layout->mNumberChannelDescriptions : 2);
 
     *playout = layout;
@@ -293,6 +321,9 @@ Pause (audio_output_t *p_aout, bool pause, mtime_t date)
      * multi-tasking, the multi-tasking view would still show a playing state
      * despite we are paused, same for lock screen */
 
+    if (pause == p_sys->b_paused)
+        return;
+
     OSStatus err;
     if (pause)
     {
@@ -309,13 +340,23 @@ Pause (audio_output_t *p_aout, bool pause, mtime_t date)
             if (err != noErr)
             {
                 ca_LogErr("AudioOutputUnitStart failed");
+                avas_SetActive(p_aout, false, 0);
                 /* Do not un-pause, the Render Callback won't run, and next call
                  * of ca_Play will deadlock */
                 return;
             }
         }
     }
+    p_sys->b_paused = pause;
     ca_Pause(p_aout, pause, date);
+}
+
+static void
+Flush(audio_output_t *p_aout, bool wait)
+{
+    struct aout_sys_t * p_sys = p_aout->sys;
+
+    ca_Flush(p_aout, wait);
 }
 
 static int
@@ -353,9 +394,14 @@ Stop(audio_output_t *p_aout)
     struct aout_sys_t   *p_sys = p_aout->sys;
     OSStatus err;
 
-    err = AudioOutputUnitStop(p_sys->au_unit);
-    if (err != noErr)
-        ca_LogWarn("AudioOutputUnitStop failed");
+    [[NSNotificationCenter defaultCenter] removeObserver:p_sys->aoutWrapper];
+
+    if (!p_sys->b_paused)
+    {
+        err = AudioOutputUnitStop(p_sys->au_unit);
+        if (err != noErr)
+            ca_LogWarn("AudioOutputUnitStop failed");
+    }
 
     au_Uninitialize(p_aout, p_sys->au_unit);
 
@@ -384,9 +430,21 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
 
     p_sys->au_unit = NULL;
 
+    [[NSNotificationCenter defaultCenter] addObserver:p_sys->aoutWrapper
+                                             selector:@selector(audioSessionRouteChange:)
+                                                 name:AVAudioSessionRouteChangeNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:p_sys->aoutWrapper
+                                             selector:@selector(handleInterruption:)
+                                                 name:AVAudioSessionInterruptionNotification
+                                               object:nil];
+
     /* Activate the AVAudioSession */
     if (avas_SetActive(p_aout, true, 0) != VLC_SUCCESS)
+    {
+        [[NSNotificationCenter defaultCenter] removeObserver:p_sys->aoutWrapper];
         return VLC_EGENERIC;
+    }
 
     /* Set the preferred number of channels, then fetch the channel layout that
      * should correspond to this number */
@@ -404,6 +462,8 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
             goto error;
     }
 
+    p_aout->current_sink_info.headphones = port_type == PORT_TYPE_HEADPHONES;
+
     p_sys->au_unit = au_NewOutputInstance(p_aout, kAudioUnitSubType_RemoteIO);
     if (p_sys->au_unit == NULL)
         goto error;
@@ -416,7 +476,7 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
         ca_LogWarn("failed to set IO mode");
 
     ret = au_Initialize(p_aout, p_sys->au_unit, fmt, layout,
-                        [p_sys->avInstance outputLatency] * CLOCK_FREQ);
+                        [p_sys->avInstance outputLatency] * CLOCK_FREQ, NULL);
     if (ret != VLC_SUCCESS)
         goto error;
 
@@ -433,13 +493,14 @@ Start(audio_output_t *p_aout, audio_sample_format_t *restrict fmt)
     if (p_sys->b_muted)
         Pause(p_aout, true, 0);
 
-    [[NSNotificationCenter defaultCenter] addObserver:p_sys->aoutWrapper
-           selector:@selector(audioSessionRouteChange:)
-           name:AVAudioSessionRouteChangeNotification object:nil];
-
     free(layout);
+    fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
     p_aout->mute_set  = MuteSet;
     p_aout->pause = Pause;
+    p_aout->flush = Flush;
+
+    aout_SoftVolumeStart( p_aout );
+
     msg_Dbg(p_aout, "analog AudioUnit output successfully opened for %4.4s %s",
             (const char *)&fmt->i_format, aout_FormatPrintChannels(fmt));
     return VLC_SUCCESS;
@@ -451,6 +512,7 @@ error:
     avas_resetPreferredNumberOfChannels(p_aout);
     avas_SetActive(p_aout, false,
                    AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation);
+    [[NSNotificationCenter defaultCenter] removeObserver:p_sys->aoutWrapper];
     msg_Err(p_aout, "opening AudioUnit output failed");
     return VLC_EGENERIC;
 }
@@ -490,6 +552,7 @@ Close(vlc_object_t *obj)
 
     [sys->aoutWrapper release];
 
+    ca_Close(aout);
     free(sys);
 }
 
@@ -520,8 +583,11 @@ Open(vlc_object_t *obj)
     aout->stop = Stop;
     aout->device_select = DeviceSelect;
 
+    aout_SoftVolumeInit( aout );
+
     for (unsigned int i = 0; i< sizeof(au_devs) / sizeof(au_devs[0]); ++i)
         aout_HotplugReport(aout, au_devs[i].psz_id, au_devs[i].psz_name);
 
+    ca_Open(aout);
     return VLC_SUCCESS;
 }

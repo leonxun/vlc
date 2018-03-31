@@ -192,12 +192,6 @@ static int Seek( sout_access_out_t *p_access, off_t i_pos )
     return lseek( (intptr_t)p_access->p_sys, i_pos, SEEK_SET );
 }
 
-static int NoSeek(sout_access_out_t *access, off_t pos)
-{
-    (void) access; (void) pos;
-    return -1;
-}
-
 static int Control( sout_access_out_t *p_access, int i_query, va_list args )
 {
     switch( i_query )
@@ -212,7 +206,7 @@ static int Control( sout_access_out_t *p_access, int i_query, va_list args )
         case ACCESS_OUT_CAN_SEEK:
         {
             bool *pb = va_arg( args, bool * );
-            *pb = p_access->pf_seek == Seek;
+            *pb = p_access->pf_seek != NULL;
             break;
         }
 
@@ -241,12 +235,6 @@ static int Open( vlc_object_t *p_this )
     int                 fd;
 
     config_ChainParse( p_access, SOUT_CFG_PREFIX, ppsz_sout_options, p_access->p_cfg );
-
-    if( !p_access->psz_path )
-    {
-        msg_Err( p_access, "no file name specified" );
-        return VLC_EGENERIC;
-    }
 
     bool overwrite = var_GetBool (p_access, SOUT_CFG_PREFIX"overwrite");
     bool append = var_GetBool( p_access, SOUT_CFG_PREFIX "append" );
@@ -348,13 +336,13 @@ static int Open( vlc_object_t *p_this )
     else if (S_ISSOCK(st.st_mode))
     {
         p_access->pf_write = Send;
-        p_access->pf_seek = NoSeek;
+        p_access->pf_seek = NULL;
     }
 #endif
     else
     {
         p_access->pf_write = WritePipe;
-        p_access->pf_seek = NoSeek;
+        p_access->pf_seek = NULL;
     }
     p_access->pf_control = Control;
     p_access->p_sys    = (void *)(intptr_t)fd;

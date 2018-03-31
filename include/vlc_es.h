@@ -26,7 +26,7 @@
 
 #include <vlc_common.h>
 #include <vlc_fourcc.h>
-#include <vlc_text_style.h>
+#include <vlc_viewpoint.h>
 
 /**
  * \file
@@ -65,6 +65,16 @@ typedef struct
     float      pf_gain[AUDIO_REPLAY_GAIN_MAX];
 } audio_replay_gain_t;
 
+
+/**
+ * Audio channel type
+ */
+typedef enum audio_channel_type_t
+{
+    AUDIO_CHANNEL_TYPE_BITMAP,
+    AUDIO_CHANNEL_TYPE_AMBISONICS,
+} audio_channel_type_t;
+
 /**
  * audio format description
  */
@@ -77,9 +87,13 @@ struct audio_format_t
      * channels which are available in the buffer, and positions). */
     uint16_t     i_physical_channels;
 
-    /* Describes from which original channels, before downmixing, the
-     * buffer is derived. */
-    uint32_t     i_original_channels;
+    /* Describes the chan mode, either set from the input
+     * (demux/codec/packetizer) or overridden by the user, used by audio
+     * filters. */
+    uint16_t     i_chan_mode;
+
+    /* Channel type */
+    audio_channel_type_t channel_type;
 
     /* Optional - for A/52, SPDIF and DTS types : */
     /* Bytes used by one compressed frame, depends on bitrate. */
@@ -134,13 +148,15 @@ struct audio_format_t
 #define AOUT_CHANS_5_0_MIDDLE (AOUT_CHANS_4_0_MIDDLE | AOUT_CHAN_CENTER)
 #define AOUT_CHANS_6_1_MIDDLE (AOUT_CHANS_5_0_MIDDLE | AOUT_CHAN_REARCENTER | AOUT_CHAN_LFE)
 
-/* Values available for original channels only */
-#define AOUT_CHAN_DOLBYSTEREO       0x10000
-#define AOUT_CHAN_DUALMONO          0x20000
-#define AOUT_CHAN_REVERSESTEREO     0x40000
-
-#define AOUT_CHAN_PHYSMASK          0xFFFF
+/* Maximum number of mapped channels (or the maximum of bits set in
+ * i_physical_channels) */
 #define AOUT_CHAN_MAX               9
+/* Maximum number of unmapped channels */
+#define INPUT_CHAN_MAX              64
+
+/* Values available for i_chan_mode only */
+#define AOUT_CHANMODE_DUALMONO    0x1
+#define AOUT_CHANMODE_DOLBYSTEREO 0x2
 
 /**
  * Picture orientation.
@@ -246,6 +262,7 @@ typedef enum video_color_primaries_t
 #define COLOR_PRIMARIES_EBU_3213        COLOR_PRIMARIES_BT601_625
 #define COLOR_PRIMARIES_BT470_BG        COLOR_PRIMARIES_BT601_625
 #define COLOR_PRIMARIES_BT470_M         COLOR_PRIMARIES_FCC1953
+#define COLOR_PRIMARIES_MAX             COLOR_PRIMARIES_FCC1953
 } video_color_primaries_t;
 
 /**
@@ -268,6 +285,7 @@ typedef enum video_transfer_func_t
 #define TRANSFER_FUNC_SMPTE_293         TRANSFER_FUNC_BT709
 #define TRANSFER_FUNC_SMPTE_296         TRANSFER_FUNC_BT709
 #define TRANSFER_FUNC_ARIB_B67          TRANSFER_FUNC_HLG
+#define TRANSFER_FUNC_MAX               TRANSFER_FUNC_HLG
 } video_transfer_func_t;
 
 /**
@@ -282,6 +300,7 @@ typedef enum video_color_space_t
 #define COLOR_SPACE_SRGB      COLOR_SPACE_BT709
 #define COLOR_SPACE_SMPTE_170 COLOR_SPACE_BT601
 #define COLOR_SPACE_SMPTE_240 COLOR_SPACE_SMPTE_170
+#define COLOR_SPACE_MAX       COLOR_SPACE_BT2020
 } video_color_space_t;
 
 /**
@@ -296,11 +315,8 @@ typedef enum video_chroma_location_t
     CHROMA_LOCATION_TOP_CENTER,
     CHROMA_LOCATION_BOTTOM_LEFT,
     CHROMA_LOCATION_BOTTOM_CENTER,
+#define CHROMA_LOCATION_MAX CHROMA_LOCATION_BOTTOM_CENTER
 } video_chroma_location_t;
-
-#define FIELD_OF_VIEW_DEGREES_DEFAULT  80.f
-#define FIELD_OF_VIEW_DEGREES_MAX 150.f
-#define FIELD_OF_VIEW_DEGREES_MIN 20.f
 
 /**
  * video format description
@@ -339,12 +355,7 @@ struct video_format_t
     video_multiview_mode_t multiview_mode;        /** Multiview mode, 2D, 3D */
 
     video_projection_mode_t projection_mode;            /**< projection mode */
-    struct {
-        float f_yaw_degrees;       /**< view point yaw in degrees ]-180;180] */
-        float f_pitch_degrees;     /**< view point pitch in degrees ]-90;90] */
-        float f_roll_degrees;     /**< view point roll in degrees ]-180;180] */
-        float f_fov_degrees;          /**< view point fov in degrees ]0;180[ */
-    } pose;
+    vlc_viewpoint_t pose;
     struct {
         /* similar to SMPTE ST 2086 mastering display color volume */
         uint16_t primaries[3*2]; /* G,B,R / x,y */
@@ -369,7 +380,7 @@ static inline void video_format_Init( video_format_t *p_src, vlc_fourcc_t i_chro
 {
     memset( p_src, 0, sizeof( video_format_t ) );
     p_src->i_chroma = i_chroma;
-    p_src->pose.f_fov_degrees = FIELD_OF_VIEW_DEGREES_DEFAULT;
+    vlc_viewpoint_init( &p_src->pose );
 }
 
 /**
@@ -528,11 +539,13 @@ struct subs_format_t
     } teletext;
     struct
     {
-        uint8_t i_reorder_depth; /* Reorder depth or transport video */
+        uint8_t i_channel;
+        /* Reorder depth of transport video, -1 for no reordering */
+        int i_reorder_depth;
     } cc;
-
-    text_style_t *p_style; /* Default styles to use */
 };
+
+#define SPU_PALETTE_DEFINED  0xbeefbeef
 
 /**
  * ES language definition
@@ -543,6 +556,17 @@ typedef struct extra_languages_t
         char *psz_description;
 } extra_languages_t;
 
+/** ES Categories */
+enum es_format_category_e
+{
+    UNKNOWN_ES = 0x00,
+    VIDEO_ES,
+    AUDIO_ES,
+    SPU_ES,
+    DATA_ES,
+};
+#define ES_CATEGORY_COUNT (DATA_ES + 1)
+
 /**
  * ES format definition
  */
@@ -552,7 +576,7 @@ typedef struct extra_languages_t
 #define ES_PRIORITY_MIN ES_PRIORITY_NOT_SELECTABLE
 struct es_format_t
 {
-    int             i_cat;              /**< ES category @see es_format_category_e */
+    enum es_format_category_e i_cat;    /**< ES category */
     vlc_fourcc_t    i_codec;            /**< FOURCC value as used in vlc */
     vlc_fourcc_t    i_original_fourcc;  /**< original FOURCC from the container */
 
@@ -593,17 +617,6 @@ struct es_format_t
 
 };
 
-/** ES Categories */
-enum es_format_category_e
-{
-    UNKNOWN_ES = 0x00,
-    VIDEO_ES,
-    AUDIO_ES,
-    SPU_ES,
-    NAV_ES,
-};
-#define ES_CATEGORY_COUNT (NAV_ES + 1)
-
 /**
  * This function will fill all RGB shift from RGB masks.
  */
@@ -638,5 +651,15 @@ VLC_API void es_format_Clean( es_format_t *fmt );
  * All descriptive fields are ignored.
  */
 VLC_API bool es_format_IsSimilar( const es_format_t *, const es_format_t * );
+
+/**
+ * Changes ES format to another category
+ * Format must have been properly initialized
+ */
+static inline void es_format_Change( es_format_t *fmt, int i_cat, vlc_fourcc_t i_codec )
+{
+    es_format_Clean( fmt );
+    es_format_Init( fmt, i_cat, i_codec );
+}
 
 #endif

@@ -1,5 +1,5 @@
 # ASS
-ASS_VERSION := 0.13.6
+ASS_VERSION := 0.14.0
 ASS_URL := https://github.com/libass/libass/releases/download/$(ASS_VERSION)/libass-$(ASS_VERSION).tar.gz
 
 PKGS += ass
@@ -27,8 +27,14 @@ WITH_FONTCONFIG = 0
 WITH_HARFBUZZ = 1
 WITH_DWRITE = 1
 else
+ifdef HAVE_NACL
 WITH_FONTCONFIG = 1
 WITH_HARFBUZZ = 1
+WITH_ASS_ASM = 0
+else
+WITH_FONTCONFIG = 1
+WITH_HARFBUZZ = 1
+endif
 endif
 endif
 endif

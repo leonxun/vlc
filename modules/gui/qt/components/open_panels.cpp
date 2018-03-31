@@ -211,6 +211,7 @@ void FileOpenPanel::dropEvent( QDropEvent *event )
                                          ui.fileListWidg );
             item->setFlags( Qt::ItemIsEditable | Qt::ItemIsEnabled );
             ui.fileListWidg->addItem( item );
+            urlList << url;
         }
     }
     updateMRL();
@@ -220,14 +221,19 @@ void FileOpenPanel::dropEvent( QDropEvent *event )
 
 void FileOpenPanel::browseFile()
 {
-    QStringList files = QFileDialog::getOpenFileNames( this, qtr( "Select one or multiple files" ), p_intf->p_sys->filepath );
+    QStringList files = THEDP->showSimpleOpen( qtr( "Select one or multiple files" ) );
     foreach( const QString &file, files )
     {
-        QListWidgetItem *item =
-            new QListWidgetItem( toNativeSeparators( file ), ui.fileListWidg );
-        item->setFlags( Qt::ItemIsEditable | Qt::ItemIsEnabled );
+        QUrl url(file);
+        urlList << url;
+        QListWidgetItem *item = nullptr;
+        item = new QListWidgetItem(
+            toNativeSeparators( url.toDisplayString(QUrl::RemovePassword | QUrl::PreferLocalFile | QUrl::NormalizePathSegments) ),
+            ui.fileListWidg
+            );
+        item->setFlags( Qt::ItemIsEnabled );
         ui.fileListWidg->addItem( item );
-        savedirpathFromFile( file );
+        p_intf->p_sys->filepath = url;
     }
     updateButtons();
     updateMRL();
@@ -240,6 +246,7 @@ void FileOpenPanel::removeFile()
     {
         QListWidgetItem *temp = ui.fileListWidg->takeItem( i );
         delete temp;
+        urlList.removeAt( i );
     }
 
     updateMRL();
@@ -249,12 +256,15 @@ void FileOpenPanel::removeFile()
 /* Show a fileBrowser to select a subtitle */
 void FileOpenPanel::browseFileSub()
 {
-    // TODO Handle selection of more than one subtitles file
     QStringList urls = THEDP->showSimpleOpen( qtr("Open subtitle file"),
                            EXT_FILTER_SUBTITLE, p_intf->p_sys->filepath );
 
-    if( urls.isEmpty() ) return;
-    ui.subInput->setText( urls.join(" ") );
+    if( urls.isEmpty() ) {
+        return;
+    }
+
+    subUrl = QUrl(urls[0]);
+    ui.subInput->setText( subUrl.toDisplayString(QUrl::RemovePassword | QUrl::PreferLocalFile | QUrl::NormalizePathSegments) );
     updateMRL();
 }
 
@@ -266,27 +276,18 @@ void FileOpenPanel::updateMRL()
 
     /* File Listing */
     if( dialogBox == NULL )
-        for( int i = 0; i < ui.fileListWidg->count(); i++ )
-        {
-            if( !ui.fileListWidg->item( i )->text().isEmpty() )
-                fileList << toURI(ui.fileListWidg->item( i )->text());
-        }
+        foreach( const QUrl& url, urlList )
+            fileList << url.toEncoded();
     else
     {
-#if HAS_QT5
         QList<QUrl> urls = dialogBox->selectedUrls();
         foreach( const QUrl &url, urls )
             fileList.append( url.toEncoded() );
-#else
-        fileList = dialogBox->selectedFiles();
-        for( int i = 0; i < fileList.count(); i++ )
-            fileList[i] = toURI( fileList[i] );
-#endif
     }
 
     /* Options */
-    if( ui.subGroupBox->isChecked() &&  !ui.subInput->text().isEmpty() ) {
-        mrl.append( " :sub-file=" + colon_escape( ui.subInput->text() ) );
+    if( ui.subGroupBox->isChecked() &&  !subUrl.isEmpty() ) {
+        mrl.append( " :sub-file=" + colon_escape( toNativeSeparators( subUrl.toLocalFile() ) ) );
     }
 
     emit methodChanged( "file-caching" );
@@ -299,6 +300,7 @@ void FileOpenPanel::accept()
     if( dialogBox )
         p_intf->p_sys->filepath = dialogBox->directory().absolutePath();
     ui.fileListWidg->clear();
+    urlList.clear();
 }
 
 /* Function called by Open Dialog when clicked on cancel */
@@ -306,12 +308,14 @@ void FileOpenPanel::clear()
 {
     ui.fileListWidg->clear();
     ui.subInput->clear();
+    urlList.clear();
+    subUrl = QUrl();
 }
 
 /* Update buttons depending on current selection */
 void FileOpenPanel::updateButtons()
 {
-    bool b_has_files = ( ui.fileListWidg->count() > 0 );
+    bool b_has_files = !urlList.empty();
     ui.removeFileButton->setEnabled( b_has_files );
     ui.subGroupBox->setEnabled( b_has_files );
 }
@@ -346,7 +350,7 @@ DiscOpenPanel::DiscOpenPanel( QWidget *_parent, intf_thread_t *_p_intf ) :
     };
     QComboBox *discCombo = ui.deviceCombo; /* avoid namespacing in macro */
     POPULATE_WITH_DEVS( ppsz_discdevices, discCombo );
-    char *psz_config = config_GetPsz( p_intf, "dvd" );
+    char *psz_config = config_GetPsz( "dvd" );
     int temp = ui.deviceCombo->findData( psz_config, Qt::UserRole, Qt::MatchStartsWith );
     free( psz_config );
     if( temp != -1 )
@@ -384,7 +388,8 @@ void DiscOpenPanel::onFocus()
     if( GetLogicalDriveStringsW( sizeof( szDrives ) / sizeof( *szDrives ) - 1, szDrives ) )
     {
         wchar_t *drive = szDrives;
-        UINT oldMode = SetErrorMode( SEM_FAILCRITICALERRORS );
+        DWORD oldMode;
+        SetThreadErrorMode( SEM_FAILCRITICALERRORS, &oldMode );
         while( *drive )
         {
             if( GetDriveTypeW(drive) == DRIVE_CDROM )
@@ -407,10 +412,10 @@ void DiscOpenPanel::onFocus()
             /* go to next drive */
             while( *(drive++) );
         }
-        SetErrorMode(oldMode);
+        SetThreadErrorMode(oldMode, NULL);
     }
 
-    char *psz_config = config_GetPsz( p_intf, "dvd" );
+    char *psz_config = config_GetPsz( "dvd" );
     int temp = ui.deviceCombo->findData( psz_config, Qt::UserRole, Qt::MatchStartsWith );
     free( psz_config );
     if( temp != -1 )
@@ -629,8 +634,10 @@ void DiscOpenPanel::updateMRL()
 
 void DiscOpenPanel::browseDevice()
 {
-    QString dir = QFileDialog::getExistingDirectory( this,
-            qtr( I_DEVICE_TOOLTIP ), p_intf->p_sys->filepath );
+    const QStringList schemes = QStringList(QStringLiteral("file"));
+    QString dir = QFileDialog::getExistingDirectoryUrl( this,
+            qtr( I_DEVICE_TOOLTIP ), p_intf->p_sys->filepath,
+            QFileDialog::ShowDirsOnly, schemes ).toLocalFile();
     if( !dir.isEmpty() )
     {
         ui.deviceCombo->addItem( toNativeSepNoSlash( dir ) );
@@ -713,7 +720,7 @@ void NetOpenPanel::onFocus()
 
 void NetOpenPanel::updateMRL()
 {
-    QString url = ui.urlComboBox->lineEdit()->text();
+    QString url = ui.urlComboBox->lineEdit()->text().trimmed();
 
     emit methodChanged( qfu( "network-caching" ) );
 
@@ -776,14 +783,13 @@ void CaptureOpenPanel::initialize()
 
     /* dshow Main */
     int line = 0;
-    module_config_t *p_config =
-        config_FindConfig( VLC_OBJECT(p_intf), "dshow-vdev" );
+    module_config_t *p_config = config_FindConfig( "dshow-vdev" );
     vdevDshowW = new StringListConfigControl(
         VLC_OBJECT(p_intf), p_config, this );
     vdevDshowW->insertIntoExistingGrid( dshowDevLayout, line );
     line++;
 
-    p_config = config_FindConfig( VLC_OBJECT(p_intf), "dshow-adev" );
+    p_config = config_FindConfig( "dshow-adev" );
     adevDshowW = new StringListConfigControl(
         VLC_OBJECT(p_intf), p_config, this );
     adevDshowW->insertIntoExistingGrid( dshowDevLayout, line );

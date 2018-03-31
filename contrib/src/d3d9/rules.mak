@@ -24,31 +24,32 @@ endif
 endif
 
 $(TARBALLS)/d3d9caps.h:
-	$(call download,$(D3D9CAPS_H_URL))
+	$(call download_pkg,$(D3D9CAPS_H_URL),d3d9)
 
 $(TARBALLS)/d3d9.h:
-	$(call download,$(D3D9_H_URL))
+	$(call download_pkg,$(D3D9_H_URL),d3d9)
 
 $(TARBALLS)/dxva2api.idl:
-	$(call download,$(DXVA2API_IDL_URL))
+	$(call download_pkg,$(DXVA2API_IDL_URL),d3d9)
 
 .sum-d3d9: $(TARBALLS)/d3d9caps.h $(TARBALLS)/d3d9.h $(TARBALLS)/dxva2api.idl
 
 $(DST_D3D9CAPS_H): $(TARBALLS)/d3d9caps.h .sum-d3d9
 	mkdir -p -- "$(PREFIX)/include/"
-	cp $(TARBALLS)/d3d9caps.h $@ && cd "$(PREFIX)/include/" && patch -fp1 < ../$(SRC)/d3d9/d3d9caps.patch
+	cd $(TARBALLS) && patch -fp1 < $(SRC)/d3d9/d3d9caps.patch -o $@
 
 $(DST_D3D9_H): $(TARBALLS)/d3d9.h .sum-d3d9
 	mkdir -p -- "$(PREFIX)/include/"
-	cp $(TARBALLS)/d3d9.h $@ && cd "$(PREFIX)/include/" && patch -fp1 < ../$(SRC)/d3d9/d3d9.patch
+	cd $(TARBALLS) && patch -fp1 < $(SRC)/d3d9/d3d9.patch -o $@
 
-dxva2api: .sum-d3d9
-	mkdir -p $@
-	cp $(TARBALLS)/dxva2api.idl $@ && cd $@ && patch -fp1 < ../$(SRC)/d3d9/dxva2api.patch
+dxva2api/dxva2api.idl: .sum-d3d9
+	mkdir -p dxva2api
+	cp $(TARBALLS)/dxva2api.idl $@
+	patch -fp1 < $(SRC)/d3d9/dxva2api.patch
 
-$(DST_DXVA2API_H): dxva2api
+$(DST_DXVA2API_H): dxva2api/dxva2api.idl
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -D_D3D9_H_ -D__C89_NAMELESS -I$(IDL_INC_PATH) -h -o $@ $</dxva2api.idl
+	$(WIDL) -DBOOL=WINBOOL -D_D3D9_H_ -D__C89_NAMELESS -I$(IDL_INC_PATH) -h -o $@ $<
 
 .d3d9caps: $(DST_D3D9CAPS_H)
 	touch $@

@@ -38,7 +38,6 @@ aout_LTLIBRARIES += libalsa_plugin.la
 endif
 
 libvlc_pulse_la_SOURCES = audio_output/vlcpulse.c audio_output/vlcpulse.h
-libvlc_pulse_la_CPPFLAGS = -DMODULE_STRING=\"pulse\"
 libvlc_pulse_la_CFLAGS = $(AM_CFLAGS) $(PULSE_CFLAGS)
 libvlc_pulse_la_LIBADD = $(PULSE_LIBS) $(LTLIBVLCCORE)
 libvlc_pulse_la_LDFLAGS = \
@@ -102,16 +101,14 @@ aout_LTLIBRARIES += libwaveout_plugin.la
 endif
 
 libauhal_plugin_la_SOURCES = audio_output/auhal.c \
-	audio_output/coreaudio_common.c audio_output/coreaudio_common.h \
-	audio_output/TPCircularBuffer.h audio_output/TPCircularBuffer.c
+	audio_output/coreaudio_common.c audio_output/coreaudio_common.h
 libauhal_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(aoutdir)' \
 	-Wl,-framework,CoreAudio,-framework,AudioUnit,-framework,AudioToolbox,-framework,CoreServices
 if HAVE_OSX
 aout_LTLIBRARIES += libauhal_plugin.la
 endif
 libaudiounit_ios_plugin_la_SOURCES = audio_output/audiounit_ios.m \
-	audio_output/coreaudio_common.c audio_output/coreaudio_common.h \
-	audio_output/TPCircularBuffer.h audio_output/TPCircularBuffer.c
+	audio_output/coreaudio_common.c audio_output/coreaudio_common.h
 libaudiounit_ios_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(aoutdir)' \
 	-Wl,-framework,CoreAudio,-framework,AudioUnit,-framework,AudioToolbox,-framework,CoreServices,-framework,UIKit,-framework,AVFoundation
 if HAVE_IOS

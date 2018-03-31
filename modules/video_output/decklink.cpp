@@ -70,16 +70,15 @@ static const int pi_channels_maps[CHANNELS_MAX+1] =
     "After this delay we black out the video."\
     )
 
-#define AFD_INDEX_TEXT "Active Format Descriptor"
-#define AFD_INDEX_LONGTEXT AFD_INDEX_TEXT " value"
+#define AFD_INDEX_TEXT N_("Active Format Descriptor value")
 
-#define AR_INDEX_TEXT "Aspect Ratio"
-#define AR_INDEX_LONGTEXT AR_INDEX_TEXT " of the source picture"
+#define AR_INDEX_TEXT N_("Aspect Ratio")
+#define AR_INDEX_LONGTEXT N_("Aspect Ratio of the source picture.")
 
-#define AFDLINE_INDEX_TEXT N_("Active Format Descriptor line.")
+#define AFDLINE_INDEX_TEXT N_("Active Format Descriptor line")
 #define AFDLINE_INDEX_LONGTEXT N_("VBI line on which to output Active Format Descriptor.")
 
-#define NOSIGNAL_IMAGE_TEXT N_("Picture to display on input signal loss.")
+#define NOSIGNAL_IMAGE_TEXT N_("Picture to display on input signal loss")
 #define NOSIGNAL_IMAGE_LONGTEXT NOSIGNAL_IMAGE_TEXT
 
 #define CARD_INDEX_TEXT N_("Output card")
@@ -233,7 +232,7 @@ static void CloseAudio          (vlc_object_t *);
 
 vlc_module_begin()
     set_shortname(N_("DecklinkOutput"))
-    set_description(N_("output module to write to Blackmagic SDI card"))
+    set_description(N_("Output module to write to Blackmagic SDI card"))
     set_section(N_("DeckLink General Options"), NULL)
     add_integer(CFG_PREFIX "card-index", 0,
                 CARD_INDEX_TEXT, CARD_INDEX_LONGTEXT, true)
@@ -257,7 +256,7 @@ vlc_module_begin()
     add_integer(VIDEO_CFG_PREFIX "afd-line", 16,
                 AFDLINE_INDEX_TEXT, AFDLINE_INDEX_LONGTEXT, true)
     add_integer_with_range(VIDEO_CFG_PREFIX "afd", 8, 0, 16,
-                AFD_INDEX_TEXT, AFD_INDEX_LONGTEXT, true)
+                AFD_INDEX_TEXT, AFD_INDEX_TEXT, true)
                 change_integer_list(rgi_afd_values, rgsz_afd_text)
     add_integer_with_range(VIDEO_CFG_PREFIX "ar", 1, 0, 1,
                 AR_INDEX_TEXT, AR_INDEX_LONGTEXT, true)
@@ -386,7 +385,7 @@ static BMDVideoConnection getVConn(vout_display_t *vd, BMDVideoConnection mask)
     }
     else /* Pick one as default connection */
     {
-        conn = ctz(mask);
+        conn = vlc_ctz(mask);
         conn = conn ? ( 1 << conn ) : bmdVideoConnectionSDI;
     }
     return conn;
@@ -445,7 +444,6 @@ static picture_t * CreateNoSignalPicture(vlc_object_t *p_this, const video_forma
     if (png)
     {
         video_format_Clean(&dummy);
-        video_format_Init(&dummy, 0);
         video_format_Copy(&dummy, fmt);
         p_pic = image_Convert(img, png, &in, &dummy);
         if(!video_format_IsSimilar(&dummy, fmt))
@@ -867,7 +865,7 @@ static void send_AFD(uint8_t afdcode, uint8_t ar, uint8_t *buf)
 
     /* parity bit */
     for (size_t i = 3; i < len - 1; i++)
-        afd[i] |= parity(afd[i]) ? 0x100 : 0x200;
+        afd[i] |= vlc_parity((unsigned)afd[i]) ? 0x100 : 0x200;
 
     /* vanc checksum */
     uint16_t vanc_sum = 0;
@@ -1067,12 +1065,10 @@ static int OpenVideo(vlc_object_t *p_this)
     video_format_Clean( &vd->fmt );
     video_format_Copy( &vd->fmt, &sys->video.currentfmt );
 
-    vd->info.has_hide_mouse = true;
     vd->pool    = PoolVideo;
     vd->prepare = PrepareVideo;
     vd->display = DisplayVideo;
     vd->control = ControlVideo;
-    vd->manage  = NULL;
 
     return VLC_SUCCESS;
 }
@@ -1119,6 +1115,7 @@ static int Start(audio_output_t *aout, audio_sample_format_t *restrict fmt)
     fmt->i_format = VLC_CODEC_S16N;
     fmt->i_channels = 2; //decklink_sys->i_channels;
     fmt->i_physical_channels = AOUT_CHANS_STEREO; //pi_channels_maps[fmt->i_channels];
+    fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
     fmt->i_rate = sys->i_rate;
     fmt->i_bitspersample = 16;
     fmt->i_blockalign = fmt->i_channels * fmt->i_bitspersample /8 ;

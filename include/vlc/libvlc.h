@@ -152,14 +152,9 @@ LIBVLC_API const char *libvlc_printerr (const char *fmt, ...);
    pthread_sigmask(SIG_BLOCK, &set, NULL);
  * @endcode
  *
- * On Microsoft Windows Vista/2008, the process error mode
- * SEM_FAILCRITICALERRORS flag <b>must</b> be set before using LibVLC.
- * On later versions, that is optional and unnecessary.
- * Also on Microsoft Windows (Vista and any later version), setting the default
- * DLL directories to SYSTEM32 exclusively is strongly recommended for
- * security reasons:
+ * On Microsoft Windows, setting the default DLL directories to SYSTEM32
+ * exclusively is strongly recommended for security reasons:
  * @code
-   SetErrorMode(SEM_FAILCRITICALERRORS);
    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
  * @endcode
  *
@@ -542,7 +537,7 @@ libvlc_module_description_t *libvlc_audio_filter_list_get( libvlc_instance_t *p_
 LIBVLC_API
 libvlc_module_description_t *libvlc_video_filter_list_get( libvlc_instance_t *p_instance );
 
-/** @} */
+/** @} */
 
 /** \defgroup libvlc_clock LibVLC time
  * These functions provide access to the LibVLC time/clock.
@@ -571,7 +566,7 @@ static inline int64_t libvlc_delay(int64_t pts)
     return pts - libvlc_clock();
 }
 
-/** @} */
+/** @} */
 
 # ifdef __cplusplus
 }

@@ -26,7 +26,7 @@
 #endif
 
 #include <vlc_vout.h>
-#include <vlc_keys.h>
+#include <vlc_actions.h>
 #include <vlc_renderer_discovery.h>
 
 #include "actions_manager.hpp"
@@ -40,12 +40,28 @@
 
 ActionsManager::ActionsManager( intf_thread_t * _p_i )
     : p_intf( _p_i )
-{ }
+    , m_scanning( false )
+{
+    CONNECT( this, rendererItemAdded( vlc_renderer_item_t* ),
+             this, onRendererItemAdded( vlc_renderer_item_t* ) );
+    CONNECT( this, rendererItemRemoved( vlc_renderer_item_t* ),
+             this, onRendererItemRemoved( vlc_renderer_item_t* ) );
+    m_stop_scan_timer.setSingleShot( true );
+    CONNECT( &m_stop_scan_timer, timeout(), this, StopRendererScan() );
+}
 
 ActionsManager::~ActionsManager()
 {
-    foreach ( vlc_renderer_discovery_t* p_rd, m_rds )
-        vlc_rd_release( p_rd );
+    StopRendererScan();
+    /* reset the list of renderers */
+    foreach (QAction* action, VLCMenuBar::rendererMenu->actions())
+    {
+        QVariant data = action->data();
+        if (!data.canConvert<QVariantHash>())
+            continue;
+        VLCMenuBar::rendererMenu->removeAction(action);
+        VLCMenuBar::rendererGroup->removeAction(action);
+    }
 }
 
 void ActionsManager::doAction( int id_action )
@@ -209,24 +225,23 @@ void ActionsManager::skipBackward()
         THEMIM->getIM()->jumpBwd();
 }
 
-bool ActionsManager::isItemSout( QVariant & m_obj, const char *psz_sout, bool as_output )
+vlc_renderer_item_t* ActionsManager::getMatchingRenderer( const QVariant &obj, vlc_renderer_item_t* p_item )
 {
-    if ( psz_sout == NULL )
-        return false;
-    if (!m_obj.canConvert<QVariantHash>())
-        return false;
-
-    QVariantHash hash = m_obj.value<QVariantHash>();
-    QString renderer(psz_sout);
-    if ( as_output && renderer.at(0) == '#' )
-        renderer = renderer.right( renderer.length() - 1 );
-    return QString::compare( hash["sout"].toString(), renderer, Qt::CaseInsensitive) == 0;
+    if (!obj.canConvert<QVariantHash>())
+        return NULL;
+    QVariantHash qvh = obj.value<QVariantHash>();
+    if (!qvh.contains( "sout" ))
+        return NULL;
+    vlc_renderer_item_t* p_existing =
+            reinterpret_cast<vlc_renderer_item_t*>( qvh["sout"].value<void*>() );
+    if ( !strcasecmp(vlc_renderer_item_sout( p_existing ),
+                    vlc_renderer_item_sout( p_item ) ) )
+        return p_existing;
+    return NULL;
 }
 
-void ActionsManager::renderer_event_item_added(
-    vlc_renderer_discovery_t *rd, vlc_renderer_item_t *p_item )
+void ActionsManager::onRendererItemAdded(vlc_renderer_item_t* p_item)
 {
-    intf_thread_t *p_intf = static_cast<intf_thread_t*>(rd->owner.sys);
     QAction *firstSeparator = NULL;
 
     foreach (QAction* action, VLCMenuBar::rendererMenu->actions())
@@ -236,118 +251,127 @@ void ActionsManager::renderer_event_item_added(
             firstSeparator = action;
             break;
         }
-        QVariant v = action->data();
-        if ( isItemSout( v, vlc_renderer_item_sout( p_item ), false ) )
+        if (getMatchingRenderer( action->data(), p_item ))
+        {
+            vlc_renderer_item_release( p_item );
             return; /* we already have this item */
+        }
     }
 
-    QHash<QString,QVariant> itemData;
-    itemData.insert("sout", vlc_renderer_item_sout( p_item ));
-    itemData.insert("filter", vlc_renderer_item_demux_filter( p_item ));
-    QVariant data(itemData);
-
-    QAction *action = new QAction( vlc_renderer_item_flags(p_item) & VLC_RENDERER_CAN_VIDEO ? QIcon( ":/sidebar/movie" ) : QIcon( ":/sidebar/music" ),
+    QAction *action = new QAction( vlc_renderer_item_flags(p_item) & VLC_RENDERER_CAN_VIDEO ? QIcon( ":/sidebar/movie.svg" ) : QIcon( ":/sidebar/music.svg" ),
                                    vlc_renderer_item_name(p_item), VLCMenuBar::rendererMenu );
     action->setCheckable(true);
-    action->setData(data);
+
+    QVariantHash data;
+    data.insert( "sout", QVariant::fromValue( reinterpret_cast<void*>( p_item ) ) );
+    action->setData( data );
     if (firstSeparator != NULL)
     {
         VLCMenuBar::rendererMenu->insertAction( firstSeparator, action );
         VLCMenuBar::rendererGroup->addAction(action);
     }
-
-    char *psz_renderer = var_InheritString( THEPL, "sout" );
-    if ( psz_renderer != NULL )
-    {
-        if ( isItemSout( data, psz_renderer, true ) )
-            action->setChecked( true );
-        free( psz_renderer );
-    }
-}
-
-void ActionsManager::renderer_event_item_removed(
-    vlc_renderer_discovery_t *rd, vlc_renderer_item_t *p_item )
-{
-    (void) rd; (void) p_item;
-}
-
-void ActionsManager::ScanRendererAction(bool checked)
-{
-    if (checked == !m_rds.empty())
-        return; /* nothing changed */
-
-    if (checked)
-    {
-        /* reset the list of renderers */
-        foreach (QAction* action, VLCMenuBar::rendererMenu->actions())
-        {
-            QVariant data = action->data();
-            if (!data.canConvert<QVariantHash>())
-                continue;
-            VLCMenuBar::rendererMenu->removeAction(action);
-            VLCMenuBar::rendererGroup->removeAction(action);
-        }
-        char *psz_renderer = var_InheritString( THEPL, "sout" );
-        if ( psz_renderer == NULL || *psz_renderer == '\0' )
-        {
-            foreach (QAction* action, VLCMenuBar::rendererMenu->actions())
-            {
-                if (!action->data().canConvert<QVariantHash>())
-                    continue;
-                if (!action->isSeparator())
-                    action->setChecked(true);
-                break;
-            }
-        }
-        free( psz_renderer );
-
-        /* SD subnodes */
-        char **ppsz_longnames;
-        char **ppsz_names;
-        if( vlc_rd_get_names( THEPL, &ppsz_names, &ppsz_longnames ) != VLC_SUCCESS )
-            return;
-
-        struct vlc_renderer_discovery_owner owner =
-        {
-            p_intf,
-            renderer_event_item_added,
-            renderer_event_item_removed,
-        };
-
-        char **ppsz_name = ppsz_names, **ppsz_longname = ppsz_longnames;
-        for( ; *ppsz_name; ppsz_name++, ppsz_longname++ )
-        {
-            msg_Dbg( p_intf, "starting renderer discovery service %s", *ppsz_longname );
-            vlc_renderer_discovery_t* p_rd = vlc_rd_new( VLC_OBJECT(p_intf), *ppsz_name, &owner );
-            if( p_rd != NULL )
-                m_rds.push_back( p_rd );
-            free( *ppsz_name );
-            free( *ppsz_longname );
-        }
-        free( ppsz_names );
-        free( ppsz_longnames );
-    }
     else
     {
-        foreach ( vlc_renderer_discovery_t* p_rd, m_rds )
-            vlc_rd_release( p_rd );
-        m_rds.clear();
+        vlc_renderer_item_release( p_item );
+        delete action;
     }
+}
+
+void ActionsManager::onRendererItemRemoved( vlc_renderer_item_t* p_item )
+{
+    foreach (QAction* action, VLCMenuBar::rendererMenu->actions())
+    {
+        if (action->isSeparator())
+            continue;
+        vlc_renderer_item_t *p_existing = getMatchingRenderer( action->data(), p_item );
+        if (p_existing)
+        {
+            VLCMenuBar::rendererMenu->removeAction( action );
+            VLCMenuBar::rendererGroup->removeAction( action );
+            vlc_renderer_item_release( p_existing );
+            break;
+        }
+    }
+    // Always release the item as we acquired it before emiting the signal
+    vlc_renderer_item_release( p_item );
+}
+
+void ActionsManager::renderer_event_item_added( vlc_renderer_discovery_t* p_rd,
+                                                vlc_renderer_item_t *p_item )
+{
+    ActionsManager *self = reinterpret_cast<ActionsManager*>( p_rd->owner.sys );
+    vlc_renderer_item_hold( p_item );
+    self->emit rendererItemAdded( p_item );
+}
+
+void ActionsManager::renderer_event_item_removed( vlc_renderer_discovery_t *p_rd,
+                                                  vlc_renderer_item_t *p_item )
+{
+    ActionsManager *self = reinterpret_cast<ActionsManager*>( p_rd->owner.sys );
+    vlc_renderer_item_hold( p_item );
+    self->emit rendererItemRemoved( p_item );
+}
+
+void ActionsManager::StartRendererScan()
+{
+    m_stop_scan_timer.stop();
+    if( m_scanning )
+        return;
+
+    /* SD subnodes */
+    char **ppsz_longnames;
+    char **ppsz_names;
+    if( vlc_rd_get_names( THEPL, &ppsz_names, &ppsz_longnames ) != VLC_SUCCESS )
+        return;
+
+    struct vlc_renderer_discovery_owner owner =
+    {
+        this,
+        renderer_event_item_added,
+        renderer_event_item_removed,
+    };
+
+    char **ppsz_name = ppsz_names, **ppsz_longname = ppsz_longnames;
+    for( ; *ppsz_name; ppsz_name++, ppsz_longname++ )
+    {
+        msg_Dbg( p_intf, "starting renderer discovery service %s", *ppsz_longname );
+        vlc_renderer_discovery_t* p_rd = vlc_rd_new( VLC_OBJECT(p_intf), *ppsz_name, &owner );
+        if( p_rd != NULL )
+            m_rds.push_back( p_rd );
+        free( *ppsz_name );
+        free( *ppsz_longname );
+    }
+    free( ppsz_names );
+    free( ppsz_longnames );
+    m_scanning = true;
+}
+
+void ActionsManager::RendererMenuCountdown()
+{
+    m_stop_scan_timer.start( 20000 );
+}
+
+void ActionsManager::StopRendererScan()
+{
+    foreach ( vlc_renderer_discovery_t* p_rd, m_rds )
+        vlc_rd_release( p_rd );
+    m_rds.clear();
+    m_scanning = false;
 }
 
 void ActionsManager::RendererSelected( QAction *selected )
 {
-    QString s_sout, s_demux_filter;
     QVariant data = selected->data();
+    vlc_renderer_item_t *p_item = NULL;
     if (data.canConvert<QVariantHash>())
     {
         QVariantHash hash = data.value<QVariantHash>();
-        s_sout.append('#');
-        s_sout.append(hash["sout"].toString());
-        s_demux_filter.append(hash["filter"].toString());
+        if ( hash.contains( "sout" ) )
+            p_item = reinterpret_cast<vlc_renderer_item_t*>(
+                        hash["sout"].value<void*>() );
     }
-    msg_Dbg( p_intf, "using sout: '%s'", s_sout.toUtf8().constData() );
-    var_SetString( THEPL, "sout", s_sout.toUtf8().constData() );
-    var_SetString( THEPL, "demux-filter", s_demux_filter.toUtf8().constData() );
+    // If we failed to convert the action data to a vlc_renderer_item_t,
+    // assume the selected item was invalid, or most likely that "Local" was selected
+    playlist_SetRenderer( THEPL, p_item );
 }
 

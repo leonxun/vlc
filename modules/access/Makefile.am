@@ -157,6 +157,7 @@ endif
 
 libdshow_plugin_la_SOURCES = access/dshow/vlc_dshow.h access/dshow/dshow.cpp access/dshow/access.h \
 	access/dshow/filter.cpp access/dshow/filter.h access/dshow/crossbar.cpp
+libdshow_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) -DSTRSAFE_NO_DEPRECATE
 libdshow_plugin_la_LIBADD = $(LIBCOM) -loleaut32 -luuid -lstrmiids -lksuser
 if HAVE_WIN32_DESKTOP
 access_LTLIBRARIES += libdshow_plugin.la
@@ -340,15 +341,12 @@ libaccess_mms_plugin_la_CFLAGS = $(AM_CFLAGS)
 libaccess_mms_plugin_la_LIBADD = $(SOCKET_LIBS)
 access_LTLIBRARIES += libaccess_mms_plugin.la
 
-libsmb_plugin_la_SOURCES = access/smb.c access/smb_common.h
-libsmb_plugin_la_CFLAGS = $(AM_CFLAGS) $(SMBCLIENT_CFLAGS)
-libsmb_plugin_la_LIBADD = $(SMBCLIENT_LIBS)
-if HAVE_WIN32
-libsmb_plugin_la_LIBADD += -lmpr
-endif
-libsmb_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
-access_LTLIBRARIES += $(LTLIBsmb)
-EXTRA_LTLIBRARIES += libsmb_plugin.la
+libsmbc_plugin_la_SOURCES = access/samba.c access/smb_common.h
+libsmbc_plugin_la_CFLAGS = $(AM_CFLAGS) $(SMBCLIENT_CFLAGS)
+libsmbc_plugin_la_LIBADD = $(SMBCLIENT_LIBS)
+libsmbc_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
+access_LTLIBRARIES += $(LTLIBsmbc)
+EXTRA_LTLIBRARIES += libsmbc_plugin.la
 
 libdsm_plugin_la_SOURCES = access/dsm/access.c access/dsm/sd.c access/smb_common.h
 libdsm_plugin_la_CFLAGS = $(AM_CFLAGS) $(DSM_CFLAGS)
@@ -364,6 +362,14 @@ access_LTLIBRARIES += libtcp_plugin.la
 libudp_plugin_la_SOURCES = access/udp.c
 libudp_plugin_la_LIBADD = $(SOCKET_LIBS) $(LIBPTHREAD)
 access_LTLIBRARIES += libudp_plugin.la
+
+libunc_plugin_la_SOURCES = access/unc.c access/smb_common.h
+libunc_plugin_la_LIBADD = -lmpr -lnetapi32
+if HAVE_WIN32
+if !HAVE_WINSTORE
+access_LTLIBRARIES += libunc_plugin.la
+endif
+endif
 
 libsftp_plugin_la_SOURCES = access/sftp.c
 libsftp_plugin_la_CFLAGS = $(AM_CFLAGS) $(SFTP_CFLAGS)
@@ -417,3 +423,13 @@ libaccess_mtp_plugin_la_LIBADD = $(MTP_LIBS)
 libaccess_mtp_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
 access_LTLIBRARIES += $(LTLIBaccess_mtp)
 EXTRA_LTLIBRARIES += libaccess_mtp_plugin.la
+
+### SRT ###
+
+libaccess_srt_plugin_la_SOURCES = access/srt.c
+libaccess_srt_plugin_la_CFLAGS = $(AM_CFLAGS) $(SRT_CFLAGS)
+libaccess_srt_plugin_la_CPPFLAGS = $(AM_CPPFLAGS) $(SRT_CPPFLAGS)
+libaccess_srt_plugin_la_LIBADD = $(SRT_LIBS)
+libaccess_srt_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(accessdir)'
+access_LTLIBRARIES += $(LTLIBaccess_srt)
+EXTRA_LTLIBRARIES += libaccess_srt_plugin.la

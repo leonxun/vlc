@@ -114,7 +114,7 @@ vlc_module_begin ()
     set_subcategory( SUBCAT_INPUT_VCODEC )
     set_shortname( "Theora" )
     set_description( N_("Theora video decoder") )
-    set_capability( "decoder", 100 )
+    set_capability( "video decoder", 100 )
     set_callbacks( OpenDecoder, CloseDecoder )
     add_shortcut( "theora" )
 #   define DEC_CFG_PREFIX "theora-"
@@ -166,7 +166,6 @@ static int OpenDecoder( vlc_object_t *p_this )
     p_sys->tcx = NULL;
 
     /* Set output properties */
-    p_dec->fmt_out.i_cat = VIDEO_ES;
     p_dec->fmt_out.i_codec = VLC_CODEC_I420;
 
     /* Set callbacks */
@@ -333,10 +332,10 @@ static int ProcessHeaders( decoder_t *p_dec )
         p_dec->fmt_out.video.i_frame_rate_base = p_sys->ti.fps_denominator;
     }
 
-    msg_Dbg( p_dec, "%dx%d %.02f fps video, frame content "
+    msg_Dbg( p_dec, "%dx%d %u/%u fps video, frame content "
              "is %dx%d with offset (%d,%d)",
              p_sys->ti.frame_width, p_sys->ti.frame_height,
-             (double)p_sys->ti.fps_numerator/p_sys->ti.fps_denominator,
+             p_sys->ti.fps_numerator, p_sys->ti.fps_denominator,
              p_sys->ti.pic_width, p_sys->ti.pic_height,
              p_sys->ti.pic_x, p_sys->ti.pic_y );
 

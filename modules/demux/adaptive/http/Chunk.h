@@ -52,6 +52,7 @@ namespace adaptive
                 virtual bool        hasMoreData     () const = 0;
                 void                setBytesRange   (const BytesRange &);
                 const BytesRange &  getBytesRange   () const;
+                virtual std::string getContentType  () const;
 
             protected:
                 size_t              contentLength;
@@ -63,6 +64,7 @@ namespace adaptive
             public:
                 virtual ~AbstractChunk();
 
+                std::string         getContentType          ();
                 size_t              getBytesRead            () const;
                 uint64_t            getStartByteInFile      () const;
                 bool                isEmpty                 () const;
@@ -90,11 +92,12 @@ namespace adaptive
                 virtual block_t *   readBlock       (); /* impl */
                 virtual block_t *   read            (size_t); /* impl */
                 virtual bool        hasMoreData     () const; /* impl */
+                virtual std::string getContentType  () const; /* reimpl */
 
                 static const size_t CHUNK_SIZE = 32768;
 
             protected:
-                virtual bool      prepare(int = 0);
+                virtual bool        prepare();
                 AbstractConnection    *connection;
                 AbstractConnectionManager *connManager;
                 size_t              consumed; /* read pointer */
@@ -118,6 +121,8 @@ namespace adaptive
                 virtual block_t *  readBlock       (); /* reimpl */
                 virtual block_t *  read            (size_t); /* reimpl */
                 virtual bool       hasMoreData     () const; /* impl */
+                void               hold();
+                void               release();
 
             protected:
                 virtual bool       prepare(); /* reimpl */
@@ -131,8 +136,9 @@ namespace adaptive
                 bool                done;
                 bool                eof;
                 mtime_t             downloadstart;
-                vlc_mutex_t         lock;
+                mutable vlc_mutex_t lock;
                 vlc_cond_t          avail;
+                bool                held;
         };
 
         class HTTPChunk : public AbstractChunk

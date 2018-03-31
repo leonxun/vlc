@@ -698,11 +698,20 @@ libvlc_media_subitems( libvlc_media_t * p_md )
 int libvlc_media_get_stats( libvlc_media_t *p_md,
                             libvlc_media_stats_t *p_stats )
 {
+    input_item_t *item = p_md->p_input_item;
+
     if( !p_md->p_input_item )
         return false;
 
+    vlc_mutex_lock( &item->lock );
+
     input_stats_t *p_itm_stats = p_md->p_input_item->p_stats;
-    vlc_mutex_lock( &p_itm_stats->lock );
+    if( p_itm_stats == NULL )
+    {
+        vlc_mutex_unlock( &item->lock );
+        return false;
+    }
+
     p_stats->i_read_bytes = p_itm_stats->i_read_bytes;
     p_stats->f_input_bitrate = p_itm_stats->f_input_bitrate;
 
@@ -720,10 +729,11 @@ int libvlc_media_get_stats( libvlc_media_t *p_md,
     p_stats->i_played_abuffers = p_itm_stats->i_played_abuffers;
     p_stats->i_lost_abuffers = p_itm_stats->i_lost_abuffers;
 
-    p_stats->i_sent_packets = p_itm_stats->i_sent_packets;
-    p_stats->i_sent_bytes = p_itm_stats->i_sent_bytes;
-    p_stats->f_send_bitrate = p_itm_stats->f_send_bitrate;
-    vlc_mutex_unlock( &p_itm_stats->lock );
+    p_stats->i_sent_packets = 0;
+    p_stats->i_sent_bytes = 0;
+    p_stats->f_send_bitrate = 0.;
+
+    vlc_mutex_unlock( &item->lock );
     return true;
 }
 
@@ -774,16 +784,15 @@ static int media_parse(libvlc_media_t *media, bool b_async,
     {
         libvlc_int_t *libvlc = media->p_libvlc_instance->p_libvlc_int;
         input_item_t *item = media->p_input_item;
-        input_item_meta_request_option_t art_scope = META_REQUEST_OPTION_NONE;
         input_item_meta_request_option_t parse_scope = META_REQUEST_OPTION_SCOPE_LOCAL;
         int ret;
 
-        if (parse_flag & libvlc_media_fetch_local)
-            art_scope |= META_REQUEST_OPTION_SCOPE_LOCAL;
+        /* Ignore libvlc_media_fetch_local flag since local art will be fetched
+         * by libvlc_MetadataRequest */
         if (parse_flag & libvlc_media_fetch_network)
-            art_scope |= META_REQUEST_OPTION_SCOPE_NETWORK;
-        if (art_scope != META_REQUEST_OPTION_NONE) {
-            ret = libvlc_ArtRequest(libvlc, item, art_scope);
+        {
+            ret = libvlc_ArtRequest(libvlc, item,
+                                    META_REQUEST_OPTION_SCOPE_NETWORK);
             if (ret != VLC_SUCCESS)
                 return ret;
         }
@@ -905,7 +914,7 @@ libvlc_media_get_tracks_info( libvlc_media_t *p_md, libvlc_media_track_info_t **
     vlc_mutex_lock( &p_input_item->lock );
 
     const int i_es = p_input_item->i_es;
-    *pp_es = (i_es > 0) ? malloc( i_es * sizeof(libvlc_media_track_info_t) ) : NULL;
+    *pp_es = (i_es > 0) ? vlc_alloc( i_es, sizeof(libvlc_media_track_info_t) ) : NULL;
 
     if( !*pp_es ) /* no ES, or OOM */
     {
@@ -1025,10 +1034,10 @@ libvlc_media_tracks_get( libvlc_media_t *p_md, libvlc_media_track_t *** pp_es )
                     ( p_es->video.projection_mode == PROJECTION_MODE_CUBEMAP_LAYOUT_STANDARD ) );
             p_mes->video->i_projection = (int) p_es->video.projection_mode;
 
-            p_mes->video->pose.f_yaw_degrees = p_es->video.pose.f_yaw_degrees;
-            p_mes->video->pose.f_pitch_degrees = p_es->video.pose.f_pitch_degrees;
-            p_mes->video->pose.f_roll_degrees = p_es->video.pose.f_roll_degrees;
-            p_mes->video->pose.f_fov_degrees = p_es->video.pose.f_fov_degrees;
+            p_mes->video->pose.f_yaw = p_es->video.pose.yaw;
+            p_mes->video->pose.f_pitch = p_es->video.pose.pitch;
+            p_mes->video->pose.f_roll = p_es->video.pose.roll;
+            p_mes->video->pose.f_field_of_view = p_es->video.pose.fov;
             break;
         case AUDIO_ES:
             p_mes->i_type = libvlc_track_audio;

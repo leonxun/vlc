@@ -28,6 +28,18 @@
 
 #define VLC_MODULE_LICENSE VLC_LICENSE_GPL_2_PLUS
 
+#include <stdlib.h>
+#include <unistd.h>
+#ifndef _POSIX_SPAWN
+# define _POSIX_SPAWN (-1)
+#endif
+#if (_POSIX_SPAWN >= 0)
+# include <spawn.h>
+# include <sys/wait.h>
+
+extern "C" char **environ;
+#endif
+
 #include <QApplication>
 #include <QDate>
 #include <QMutex>
@@ -50,19 +62,20 @@
 
 #include <vlc_plugin.h>
 #include <vlc_vout_window.h>
+#ifndef X_DISPLAY_MISSING
+# include <vlc_xlib.h>
+#endif
 
 #ifdef _WIN32 /* For static builds */
  #include <QtPlugin>
- #if HAS_QT5
-  #ifdef QT_STATICPLUGIN
-   Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin)
-   #if !HAS_QT56
-    Q_IMPORT_PLUGIN(AccessibleFactory)
-   #endif
+
+ #ifdef QT_STATICPLUGIN
+  Q_IMPORT_PLUGIN(QWindowsIntegrationPlugin)
+  Q_IMPORT_PLUGIN(QSvgIconPlugin)
+  Q_IMPORT_PLUGIN(QSvgPlugin)
+  #if !HAS_QT56
+   Q_IMPORT_PLUGIN(AccessibleFactory)
   #endif
- #else
-  Q_IMPORT_PLUGIN(qjpeg)
-  Q_IMPORT_PLUGIN(qtaccessiblewidgets)
  #endif
 #endif
 
@@ -92,7 +105,7 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 
 #define MINIMIZED_TEXT N_( "Start VLC with only a systray icon" )
 #define MINIMIZED_LONGTEXT N_( "VLC will start with just an icon in " \
-                               "your taskbar" )
+                               "your taskbar." )
 
 #define KEEPSIZE_TEXT N_( "Resize interface to the native video size" )
 #define KEEPSIZE_LONGTEXT N_( "You have two choices:\n" \
@@ -121,7 +134,6 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
                              " This option only works with Windows and " \
                              "X11 with composite extensions." )
 
-
 #define ERROR_TEXT N_( "Show unimportant error and warnings dialogs" )
 
 #define UPDATER_TEXT N_( "Activate the updates availability notification" )
@@ -136,15 +148,15 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 
 #define RECENTPLAY_FILTER_TEXT N_( "List of words separated by | to filter" )
 #define RECENTPLAY_FILTER_LONGTEXT N_( "Regular expression used to filter " \
-        "the recent items played in the player" )
+        "the recent items played in the player." )
 
-#define SLIDERCOL_TEXT N_( "Define the colors of the volume slider " )
+#define SLIDERCOL_TEXT N_( "Define the colors of the volume slider" )
 #define SLIDERCOL_LONGTEXT N_( "Define the colors of the volume slider\n" \
                        "By specifying the 12 numbers separated by a ';'\n" \
             "Default is '255;255;255;20;226;20;255;176;15;235;30;20'\n" \
-            "An alternative can be '30;30;50;40;40;100;50;50;160;150;150;255' ")
+            "An alternative can be '30;30;50;40;40;100;50;50;160;150;150;255'")
 
-#define QT_MODE_TEXT N_( "Selection of the starting mode and look " )
+#define QT_MODE_TEXT N_( "Selection of the starting mode and look" )
 #define QT_MODE_LONGTEXT N_( "Start VLC with:\n" \
                              " - normal mode\n"  \
                              " - a zone always present to show information " \
@@ -156,11 +168,11 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 
 #define FULLSCREEN_NUMBER_TEXT N_( "Define which screen fullscreen goes" )
 #define FULLSCREEN_NUMBER_LONGTEXT N_( "Screennumber of fullscreen, instead of " \
-                                       "same screen where interface is" )
+                                       "same screen where interface is." )
 
 #define QT_AUTOLOAD_EXTENSIONS_TEXT N_( "Load extensions on startup" )
 #define QT_AUTOLOAD_EXTENSIONS_LONGTEXT N_( "Automatically load the "\
-                                            "extensions module on startup" )
+                                            "extensions module on startup." )
 
 #define QT_MINIMAL_MODE_TEXT N_("Start in minimal view (without menus)" )
 
@@ -168,8 +180,8 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 #define QT_BGCONE_LONGTEXT N_( "Display background cone or current album art " \
                             "when not playing. " \
                             "Can be disabled to prevent burning screen." )
-#define QT_BGCONE_EXPANDS_TEXT N_( "Expanding background cone or art." )
-#define QT_BGCONE_EXPANDS_LONGTEXT N_( "Background art fits window's size" )
+#define QT_BGCONE_EXPANDS_TEXT N_( "Expanding background cone or art" )
+#define QT_BGCONE_EXPANDS_LONGTEXT N_( "Background art fits window's size." )
 
 #define QT_DISABLE_VOLUME_KEYS_TEXT N_( "Ignore keyboard volume buttons." )
 #define QT_DISABLE_VOLUME_KEYS_LONGTEXT N_(                                             \
@@ -190,7 +202,7 @@ static void ShowDialog   ( intf_thread_t *, int, int, intf_dialog_args_t * );
 
 #define AUTORAISE_ON_PLAYBACK_TEXT N_( "When to raise the interface" )
 #define AUTORAISE_ON_PLAYBACK_LONGTEXT N_( "This option allows the interface to be raised automatically " \
-    "when a video/audio playback starts, or never" )
+    "when a video/audio playback starts, or never." )
 
 #define FULLSCREEN_CONTROL_PIXELS N_( "Fullscreen controller mouse sensitivity" )
 
@@ -213,7 +225,7 @@ static const int i_raise_list[] =
       MainInterface::RAISE_AUDIO, MainInterface::RAISE_AUDIOVIDEO,  };
 
 static const char *const psz_raise_list_text[] =
-    { N_( "Never" ), N_( "Video" ), N_( "Audio" ), _( "Both" ) };
+    { N_( "Never" ), N_( "Video" ), N_( "Audio" ), _( "Audio/Video" ) };
 
 /**********************************************************************/
 vlc_module_begin ()
@@ -346,12 +358,7 @@ static bool active = false;
  * Module callbacks
  *****************************************************************************/
 
-static void *ThreadPlatform( void *, char * );
-
-static void *Thread( void *data )
-{
-    return ThreadPlatform( data, NULL );
-}
+static void *Thread( void * );
 
 #ifdef Q_OS_MAC
 /* Used to abort the app.exec() on OSX after libvlc_Quit is called */
@@ -362,67 +369,38 @@ static void Abort( void *obj )
 }
 #endif
 
-#if defined (QT5_HAS_X11)
-# include <vlc_xlib.h>
-
-static void *ThreadXCB( void *data )
-{
-    char platform_name[] = "xcb";
-    return ThreadPlatform( data, platform_name );
-}
-
-static bool HasX11( vlc_object_t *obj )
-{
-    if( !vlc_xlib_init( obj ) )
-        return false;
-
-    Display *dpy = XOpenDisplay( NULL );
-    if( dpy == NULL )
-        return false;
-
-    XCloseDisplay( dpy );
-    return true;
-}
-#endif
-
-#ifdef QT5_HAS_WAYLAND
-# include <wayland-client.h>
-
-static void *ThreadWayland( void *data )
-{
-    char platform_name[] = "wayland";
-    return ThreadPlatform( data, platform_name );
-}
-
-static bool HasWayland( void )
-{
-    struct wl_display *dpy = wl_display_connect( NULL );
-    if( dpy == NULL )
-        return false;
-
-    wl_display_disconnect( dpy );
-    return true;
-}
-#endif
-
 /* Open Interface */
 static int Open( vlc_object_t *p_this, bool isDialogProvider )
 {
     intf_thread_t *p_intf = (intf_thread_t *)p_this;
-    void *(*thread)(void *) = Thread;
 
-#ifdef QT5_HAS_WAYLAND
-    if( HasWayland() )
-        thread = ThreadWayland;
-    else
-#endif
-#ifdef QT5_HAS_X11
-    if( HasX11( p_this ) )
-        thread = ThreadXCB;
-    else
-#endif
-#if defined (QT5_HAS_X11) || defined (QT5_HAS_WAYLAND)
+#ifndef X_DISPLAY_MISSING
+    if (!vlc_xlib_init(p_this))
         return VLC_EGENERIC;
+#endif
+
+#if (_POSIX_SPAWN >= 0)
+    /* Check if QApplication works */
+    char *path = config_GetSysPath(VLC_PKG_LIBEXEC_DIR, "vlc-qt-check");
+    if (unlikely(path == NULL))
+        return VLC_ENOMEM;
+
+    char *argv[] = { path, NULL };
+    pid_t pid;
+
+    int val = posix_spawn(&pid, path, NULL, NULL, argv, environ);
+    free(path);
+    if (val)
+        return VLC_ENOMEM;
+
+    int status;
+    while (waitpid(pid, &status, 0) == -1);
+
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
+        msg_Dbg(p_this, "Qt check failed (%d). Skipping.", status);
+        return VLC_EGENERIC;
+    }
 #endif
 
     QMutexLocker locker (&lock);
@@ -451,7 +429,7 @@ static int Open( vlc_object_t *p_this, bool isDialogProvider )
     libvlc_SetExitHandler( p_intf->obj.libvlc, Abort, p_intf );
     thread( (void *)p_intf );
 #else
-    if( vlc_clone( &p_sys->thread, thread, p_intf, VLC_THREAD_PRIORITY_LOW ) )
+    if( vlc_clone( &p_sys->thread, Thread, p_intf, VLC_THREAD_PRIORITY_LOW ) )
     {
         delete p_sys;
         return VLC_ENOMEM;
@@ -507,21 +485,15 @@ static void Close( vlc_object_t *p_this )
     busy = false;
 }
 
-static void *ThreadPlatform( void *obj, char *platform_name )
+static void *Thread( void *obj )
 {
     intf_thread_t *p_intf = (intf_thread_t *)obj;
     intf_sys_t *p_sys = p_intf->p_sys;
     char vlc_name[] = "vlc"; /* for WM_CLASS */
-    char platform_parm[] = "-platform";
-    char *argv[4];
+    char *argv[2];
     int argc = 0;
 
     argv[argc++] = vlc_name;
-    if( platform_name != NULL )
-    {
-        argv[argc++] = platform_parm;
-        argv[argc++] = platform_name;
-    }
     argv[argc] = NULL;
 
     Q_INIT_RESOURCE( vlc );
@@ -559,13 +531,10 @@ static void *ThreadPlatform( void *obj, char *platform_name )
 #endif
             QSettings::UserScope, "vlc", "vlc-qt-interface" );
 
-    /* Icon setting, Mac uses icon from .icns */
-#ifndef Q_OS_MAC
     if( QDate::currentDate().dayOfYear() >= QT_XMAS_JOKE_DAY && var_InheritBool( p_intf, "qt-icon-change" ) )
         app.setWindowIcon( QIcon::fromTheme( "vlc-xmas", QIcon( ":/logo/vlc128-xmas.png" ) ) );
     else
         app.setWindowIcon( QIcon::fromTheme( "vlc", QIcon( ":/logo/vlc256.png" ) ) );
-#endif
 
     /* Initialize the Dialog Provider and the Main Input Manager */
     DialogsProvider::getInstance( p_intf );
@@ -602,7 +571,6 @@ static void *ThreadPlatform( void *obj, char *platform_name )
 
         /* Check window type from the Qt platform back-end */
         p_sys->voutWindowType = VOUT_WINDOW_TYPE_INVALID;
-#if HAS_QT5
         QString platform = app.platformName();
         if( platform == qfu("xcb") )
             p_sys->voutWindowType = VOUT_WINDOW_TYPE_XID;
@@ -614,11 +582,6 @@ static void *ThreadPlatform( void *obj, char *platform_name )
             p_sys->voutWindowType = VOUT_WINDOW_TYPE_NSOBJECT;
         else
             msg_Err( p_intf, "unknown Qt platform: %s", qtu(platform) );
-#elif defined (Q_WS_WIN) || defined (Q_WS_PM)
-        p_sys->voutWindowType = VOUT_WINDOW_TYPE_HWND;
-#elif defined (Q_WS_MAC)
-        p_sys->voutWindowType = VOUT_WINDOW_TYPE_NSOBJECT;
-#endif
 
         var_Create( THEPL, "qt4-iface", VLC_VAR_ADDRESS );
         var_SetAddress( THEPL, "qt4-iface", p_intf );
@@ -755,6 +718,7 @@ static int WindowOpen( vout_window_t *p_wnd, const vout_window_cfg_t *cfg )
     if( !p_mi->getVideo( p_wnd, cfg->width, cfg->height, cfg->is_fullscreen ) )
         return VLC_EGENERIC;
 
+    p_wnd->info.has_double_click = true;
     p_wnd->control = WindowControl;
     p_wnd->sys = (vout_window_sys_t*)p_mi;
     return VLC_SUCCESS;

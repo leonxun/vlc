@@ -55,7 +55,8 @@
 #include <vlc_filter.h>
 #include <vlc_mouse.h>
 #include <vlc_subpicture.h>
-#include <vlc_keys.h>                  /* KEY_MODIFIER_CTRL */
+#include <vlc_actions.h>               /* KEY_MODIFIER_CTRL */
+
 #include <vlc_network.h>               /* net_*, htonl */
 #include <gcrypt.h>                    /* to encrypt password */
 #include <vlc_gcrypt.h>
@@ -81,7 +82,7 @@
 
 #define RMTOSD_UPDATE_TEXT N_("VNC poll interval" )
 #define RMTOSD_UPDATE_LONGTEXT N_( \
-    "In this interval an update from VNC is requested, default every 300 ms. ")
+    "In this interval an update from VNC is requested, default every 300 ms.")
 
 #define RMTOSD_POLL_TEXT N_("VNC polling")
 #define RMTOSD_POLL_LONGTEXT N_( \
@@ -359,9 +360,9 @@ static int vnc_connect( filter_t *p_filter )
 
     msg_Dbg( p_filter, "Server version is %s", pv );
 
-    strncpy(pv, "RFB 003.003\n", sz_rfbProtocolVersionMsg);
+    static const char version[sz_rfbProtocolVersionMsg] = "RFB 003.003\n";
 
-    if( !write_exact(p_filter, fd, pv, sz_rfbProtocolVersionMsg) )
+    if( !write_exact(p_filter, fd, version, sz_rfbProtocolVersionMsg) )
     {
         msg_Err( p_filter, "Could not write version message" );
         goto error;

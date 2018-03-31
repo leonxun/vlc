@@ -1,4 +1,5 @@
 name: vlc
+version-script: cat $SNAPCRAFT_STAGE/version
 version: "daily"
 grade: stable
 summary: Read, capture, broadcast your multimedia streams
@@ -6,11 +7,13 @@ description: |
   VLC is a free and open source cross-platform multimedia player and
   framework that plays most multimedia files as well as DVDs, Audio CDs,
   VCDs, and various streaming protocols.
+  NOTE. This snap contains an untested daily build of VLC
 confinement: strict
 
 apps:
   vlc:
-    command: bin/vlc-snap-wrapper.sh
+    desktop: usr/share/applications/vlc.desktop
+    command: desktop-launch $SNAP/bin/vlc-snap-wrapper.sh
     plugs:
       - unity7
       - network
@@ -24,28 +27,67 @@ apps:
       - removable-media
       - screen-inhibit-control
       - x11
+      - desktop
+      - desktop-legacy
     slots:
       - mpris
 
 parts:
   vlc:
+    after: [desktop-qt5]
     source: ../../../
     source-type: git
     plugin: autotools
+    prepare: |
+      sed -i 's|0\.19\.8|0\.19\.7|'  configure.ac
+    build: |
+      cd extras/tools
+      ./bootstrap
+      make -j $(getconf _NPROCESSORS_ONLN) .protoc
+      cd ../../
+      export PATH=$PWD/extras/tools/build/bin:$PATH
+      cd contrib && mkdir linux && cd linux
+      ../bootstrap
+      make list
+      make -j $(getconf _NPROCESSORS_ONLN) .protobuf
+      make -j $(getconf _NPROCESSORS_ONLN) .libplacebo
+      make -j $(getconf _NPROCESSORS_ONLN) .ffmpeg
+      make -j $(getconf _NPROCESSORS_ONLN) .spatialaudio
+      make -j $(getconf _NPROCESSORS_ONLN) .microdns
+      make -j $(getconf _NPROCESSORS_ONLN) .libarchive
+      cd ../../
+      export NOCONFIGURE=1
+      autoreconf -fi
+      ./configure \
+          --prefix=$SNAPCRAFT_PART_INSTALL/usr \
+          --disable-wayland \
+          --enable-merge-ffmpeg
+      make -j $(getconf _NPROCESSORS_ONLN)
+    install: |
+      echo $(git describe HEAD) > $SNAPCRAFT_STAGE/version
+      make install
+      sed -i 's|Icon=vlc|Icon=/usr/share/icons/hicolor/256x256/apps/vlc\.png|' $SNAPCRAFT_PART_INSTALL/usr/share/applications/vlc.desktop
+      sed -i 's|TryExec=.*|TryExec=/snap/bin/vlc|' $SNAPCRAFT_PART_INSTALL/usr/share/applications/vlc.desktop
     build-packages:
-      - autopoint
-      - debhelper
-      - dh-autoreconf
-      - dh-buildinfo
-      - gettext
+      - git
+      - g++
+      - make
+      - yasm
+      - autoconf
+      - libtool
+      - cmake
+      - automake
+      - build-essential
+      - libxcb-xfixes0-dev
+      - texinfo
+      - libvpx-dev
+      - libqt5svg5-dev
       - liba52-0.7.4-dev
       - libaa1-dev
       - libasound2-dev
       - libass-dev
       - libavahi-client-dev
       - libavc1394-dev
-      - libavcodec-dev
-      - libavformat-dev
       - libbluray-dev
       - libcaca-dev
       - libcairo2-dev
@@ -84,12 +126,12 @@ parts:
       - libmpeg2-4-dev
       - libmtp-dev
       - libncursesw5-dev
-      - libnotify-dev
       - libogg-dev
       - libomxil-bellagio-dev
       - libopus-dev
       - libpng-dev
       - libpostproc-dev
+      - libprojectm-dev
       - libpulse-dev
       - libqt5x11extras5-dev
       - qtbase5-private-dev
@@ -99,6 +141,7 @@ parts:
       - libsamplerate0-dev
       - libsdl-image1.2-dev
       - libsdl1.2-dev
+      - libsecret-1-dev
       - libshine-dev
       - libshout3-dev
       - libsidplay2-dev
@@ -135,20 +178,16 @@ parts:
       - libzvbi-dev
       - lua5.2
       - pkg-config
-      - protobuf-compiler
       - qtbase5-dev
-      - wayland-protocols
+      - xz-utils
       - zlib1g-dev
+      - bison
+      - flex
       - zsh
-
-  env:
-    plugin: nil
     stage-packages:
       - fonts-freefont-ttf
+      - dbus-x11
       - libaa1
-      - libavcodec57
-      - libavcodec-extra57
-      - libavutil55
       - libcaca0
       - libcairo2
       - libegl1-mesa
@@ -159,7 +198,6 @@ parts:
       - libfribidi0
       - libgcc1
       - libgl1-mesa-glx
-      - libgles1-mesa
       - libgles2-mesa
       - libglib2.0-0
       - libpulse0
@@ -168,9 +206,11 @@ parts:
       - librsvg2-2
       - libsdl-image1.2
       - libsdl1.2debian
+      - libsecret-1-0
       - libva-drm1
       - libva-x11-1
       - libva1
+      - libvdpau1
       - libvncclient1
       - libx11-6
       - libxcb-composite0
@@ -183,8 +223,31 @@ parts:
       - libxi6
       - libxinerama1
       - libxpm4
+      - vdpau-va-driver
+      - i965-va-driver
+      - mesa-utils
+      - mesa-vdpau-drivers
       - zlib1g
-    after: [vlc] # VLC build fails if stage packages are present
+      - libprojectm2v5
+      - projectm-data
+      - kde-style-breeze
+      - breeze-icon-theme
+      - frameworkintegration
+      - plasma-integration
+      - phonon4qt5-backend-null
+    filesets:
+      exclusion:
+      - "-usr/lib/*/cmake/*"
+      - "-usr/include/*"
+      - "-usr/share/ECM/*"
+      - "-usr/share/doc/*"
+      - "-usr/share/man/*"
+      - "-usr/share/icons/breeze-dark*"
+      - "-usr/bin/X11"
+      - "-usr/lib/gcc/x86_64-linux-gnu/6.0.0"
+      - "-usr/lib/aspell/*"
+    prime:
+      - "$exclusion"
 
   wrapper:
     plugin: dump

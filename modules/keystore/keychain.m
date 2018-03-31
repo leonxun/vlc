@@ -54,12 +54,12 @@ static const char *const accessibility_list_text[] = {
 };
 
 #define SYNC_ITEMS_TEXT N_("Synchronize stored items")
-#define SYNC_ITEMS_LONGTEXT N_("Synchronizes stored items via iCloud Keychain if enabled in the user domain. Requires iOS 7 / Mac OS X 10.9 / tvOS 9.0 or higher.")
+#define SYNC_ITEMS_LONGTEXT N_("Synchronizes stored items via iCloud Keychain if enabled in the user domain.")
 
 #define ACCESSIBILITY_TYPE_TEXT N_("Accessibility type for all future passwords saved to the Keychain")
 
 #define ACCESS_GROUP_TEXT N_("Keychain access group")
-#define ACCESS_GROUP_LONGTEXT N_("Keychain access group as defined by the app entitlements. Requires iOS 3 / Mac OS X 10.9 / tvOS 9.0 or higher.")
+#define ACCESS_GROUP_LONGTEXT N_("Keychain access group as defined by the app entitlements.")
 
 /* VLC can be compiled against older SDKs (like before OS X 10.10)
  * but newer features should still be available.
@@ -207,6 +207,8 @@ static NSString * ErrorForStatus(OSStatus status)
 #define OSX_MAVERICKS (NSAppKitVersionNumber >= 1265)
 extern const CFStringRef kSecAttrAccessible;
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpartial-availability"
 static void SetAccessibilityForQuery(vlc_keystore *p_keystore,
                                      NSMutableDictionary *query)
 {
@@ -240,6 +242,7 @@ static void SetAccessibilityForQuery(vlc_keystore *p_keystore,
             break;
     }
 }
+#pragma clang diagnostic pop
 
 static void SetAttributesForQuery(const char *const ppsz_values[KEY_MAX], NSMutableDictionary *query, const char *psz_label)
 {
@@ -378,6 +381,7 @@ static unsigned int Find(vlc_keystore *p_keystore,
         SecKeychainItemRef itemRef = (__bridge SecKeychainItemRef)([listOfResults objectAtIndex:i]);
 
         SecKeychainAttributeInfo attrInfo;
+        attrInfo.count = 0;
 
 #ifndef NDEBUG
         attrInfo.count = 1;

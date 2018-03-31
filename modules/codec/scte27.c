@@ -41,7 +41,7 @@ static void Close(vlc_object_t *);
 vlc_module_begin ()
     set_description(N_("SCTE-27 decoder"))
     set_shortname(N_("SCTE-27"))
-    set_capability( "decoder", 51)
+    set_capability( "spu decoder", 51)
     set_category(CAT_INPUT)
     set_subcategory(SUBCAT_INPUT_SCODEC)
     set_callbacks(Open, Close)
@@ -142,7 +142,7 @@ static subpicture_region_t *DecodeSimpleBitmap(decoder_t *dec,
     int bitmap_h = bottom_h - top_h;
     int bitmap_v = bottom_v - top_v;
     int bitmap_size = bitmap_h * bitmap_v;
-    bool *bitmap = malloc(bitmap_size * sizeof(*bitmap));
+    bool *bitmap = vlc_alloc(bitmap_size, sizeof(*bitmap));
     if (!bitmap)
         return NULL;
     for (int position = 0; position < bitmap_size;) {
@@ -503,8 +503,7 @@ static int Open(vlc_object_t *object)
     sys->segment_buffer = NULL;
 
     dec->pf_decode = Decode;
-    es_format_Init(&dec->fmt_out, SPU_ES, VLC_CODEC_SPU);
-    dec->fmt_out.video.i_chroma = VLC_CODEC_YUVP;
+    dec->fmt_out.i_codec = VLC_CODEC_YUVP;
 
     return VLC_SUCCESS;
 }

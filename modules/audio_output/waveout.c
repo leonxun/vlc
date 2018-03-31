@@ -74,8 +74,7 @@ static void WaveOutClean( aout_sys_t * p_sys );
 
 static void WaveOutClearBuffer( HWAVEOUT, WAVEHDR *);
 
-static int ReloadWaveoutDevices( vlc_object_t *, const char *,
-                                 char ***, char *** );
+static int ReloadWaveoutDevices( const char *, char ***, char *** );
 static uint32_t findDeviceID(char *);
 static int WaveOutTimeGet(audio_output_t * , mtime_t *);
 static void WaveOutFlush( audio_output_t *, bool);
@@ -327,6 +326,8 @@ static int Start( audio_output_t *p_aout, audio_sample_format_t *restrict fmt )
     p_aout->sys->i_frames = 0;
     p_aout->sys->i_played_length = 0;
     p_aout->sys->p_free_list = NULL;
+
+    fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
 
     return VLC_SUCCESS;
 }
@@ -694,12 +695,12 @@ static void WaveOutClearBuffer( HWAVEOUT h_waveout, WAVEHDR *p_waveheader )
 /*
   reload the configuration drop down list, of the Audio Devices
 */
-static int ReloadWaveoutDevices( vlc_object_t *p_this, char const *psz_name,
+static int ReloadWaveoutDevices( char const *psz_name,
                                  char ***values, char ***descs )
 {
     int n = 0, nb_devices = waveOutGetNumDevs();
 
-    VLC_UNUSED( p_this); VLC_UNUSED( psz_name );
+    VLC_UNUSED( psz_name );
 
     *values = xmalloc( (nb_devices + 1) * sizeof(char *) );
     *descs = xmalloc( (nb_devices + 1) * sizeof(char *) );
@@ -804,7 +805,7 @@ static int Open(vlc_object_t *obj)
 
     /* WaveOut does not support hot-plug events so list devices at startup */
     char **ids, **names;
-    int count = ReloadWaveoutDevices(VLC_OBJECT(aout), NULL, &ids, &names);
+    int count = ReloadWaveoutDevices(NULL, &ids, &names);
     if (count >= 0)
     {
         for (int i = 0; i < count; i++)
@@ -942,7 +943,7 @@ static int WaveoutVolumeSet( audio_output_t *p_aout, float volume )
     sys->f_volume = volume;
 
     if( var_InheritBool( p_aout, "volume-save" ) )
-        config_PutFloat( p_aout, "waveout-volume", volume );
+        config_PutFloat( "waveout-volume", volume );
 
     aout_VolumeReport( p_aout, volume );
     vlc_mutex_unlock(&p_aout->sys->lock);
@@ -1007,7 +1008,7 @@ static void WaveoutPollVolume( void * aout )
         p_aout->sys->f_volume = volume;
 
         if( var_InheritBool( p_aout, "volume-save" ) )
-            config_PutFloat( p_aout, "waveout-volume", volume );
+            config_PutFloat( "waveout-volume", volume );
 
         aout_VolumeReport( p_aout, volume );
     }

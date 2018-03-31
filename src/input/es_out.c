@@ -93,8 +93,12 @@ struct es_out_id_t
     decoder_t   *p_dec_record;
 
     /* Fields for Video with CC */
-    bool  pb_cc_present[4];
-    es_out_id_t  *pp_cc_es[4];
+    struct
+    {
+        vlc_fourcc_t type;
+        uint64_t     i_bitmap;    /* channels bitmap */
+        es_out_id_t  *pp_es[64]; /* a max of 64 chans for CEA708 */
+    } cc;
 
     /* Field for CC track from a master video */
     es_out_id_t *p_master;
@@ -193,7 +197,8 @@ static void EsOutDecodersChangePause( es_out_t *out, bool b_paused, mtime_t i_da
 static void EsOutProgramChangePause( es_out_t *out, bool b_paused, mtime_t i_date );
 static void EsOutProgramsChangeRate( es_out_t *out );
 static void EsOutDecodersStopBuffering( es_out_t *out, bool b_forced );
-static void EsOutMeta( es_out_t *p_out, const vlc_meta_t *p_meta );
+static void EsOutGlobalMeta( es_out_t *p_out, const vlc_meta_t *p_meta );
+static void EsOutMeta( es_out_t *p_out, const vlc_meta_t *p_meta, const vlc_meta_t *p_progmeta );
 
 static char *LanguageGetName( const char *psz_code );
 static char *LanguageGetCode( const char *psz_lang );
@@ -203,21 +208,16 @@ static int LanguageArrayIndex( char **ppsz_langs, const char *psz_lang );
 static char *EsOutProgramGetMetaName( es_out_pgrm_t *p_pgrm );
 static char *EsInfoCategoryName( es_out_id_t* es );
 
-static const vlc_fourcc_t EsOutFourccClosedCaptions[4] = {
-    VLC_CODEC_EIA608_1,
-    VLC_CODEC_EIA608_2,
-    VLC_CODEC_EIA608_3,
-    VLC_CODEC_EIA608_4,
-};
-static inline int EsOutGetClosedCaptionsChannel( vlc_fourcc_t fcc )
+static inline int EsOutGetClosedCaptionsChannel( const es_format_t *p_fmt )
 {
-    int i;
-    for( i = 0; i < 4; i++ )
-    {
-        if( fcc == EsOutFourccClosedCaptions[i] )
-            return i;
-    }
-    return -1;
+    int i_channel;
+    if( p_fmt->i_codec == VLC_CODEC_CEA608 && p_fmt->subs.cc.i_channel < 4 )
+        i_channel = p_fmt->subs.cc.i_channel;
+    else if( p_fmt->i_codec == VLC_CODEC_CEA708 && p_fmt->subs.cc.i_channel < 64 )
+        i_channel = p_fmt->subs.cc.i_channel;
+    else
+        i_channel = -1;
+    return i_channel;
 }
 static inline bool EsFmtIsTeletext( const es_format_t *p_fmt )
 {
@@ -412,12 +412,14 @@ static mtime_t EsOutGetWakeup( es_out_t *out )
     return input_clock_GetWakeup( p_sys->p_pgrm->p_clock );
 }
 
+static es_out_id_t es_cat[DATA_ES];
+
 static es_out_id_t *EsOutGetFromID( es_out_t *out, int i_id )
 {
     if( i_id < 0 )
     {
         /* Special HACK, -i_id is the cat of the stream */
-        return (es_out_id_t*)((uint8_t*)NULL-i_id);
+        return es_cat - i_id;
     }
 
     for( int i = 0; i < out->p_sys->i_es; i++ )
@@ -1238,7 +1240,7 @@ static void EsOutProgramMeta( es_out_t *out, int i_group, const vlc_meta_t *p_me
 
     if( i_group < 0 )
     {
-        EsOutMeta( out, p_meta );
+        EsOutGlobalMeta( out, p_meta );
         return;
     }
 
@@ -1253,8 +1255,9 @@ static void EsOutProgramMeta( es_out_t *out, int i_group, const vlc_meta_t *p_me
     {
         const char *psz_current_title = vlc_meta_Get( p_pgrm->p_meta, vlc_meta_Title );
         const char *psz_new_title = vlc_meta_Get( p_meta, vlc_meta_Title );
-        if( !psz_current_title != !psz_new_title ||
-            ( psz_new_title && psz_new_title && strcmp(psz_new_title, psz_current_title)) )
+        if( (psz_current_title != NULL && psz_new_title != NULL)
+            ? strcmp(psz_new_title, psz_current_title)
+            : (psz_current_title != psz_new_title) )
         {
             /* Remove old entries */
             char *psz_oldinfokey = EsOutProgramGetMetaName( p_pgrm );
@@ -1271,7 +1274,7 @@ static void EsOutProgramMeta( es_out_t *out, int i_group, const vlc_meta_t *p_me
 
     if( p_sys->p_pgrm == p_pgrm )
     {
-        EsOutMeta( out, p_meta );
+        EsOutMeta( out, NULL, p_meta );
     }
     /* */
     psz_title = vlc_meta_Get( p_meta, vlc_meta_Title);
@@ -1471,27 +1474,35 @@ static void EsOutProgramUpdateScrambled( es_out_t *p_out, es_out_pgrm_t *p_pgrm 
     input_SendEventProgramScrambled( p_input, p_pgrm->i_id, b_scrambled );
 }
 
-static void EsOutMeta( es_out_t *p_out, const vlc_meta_t *p_meta )
+static void EsOutMeta( es_out_t *p_out, const vlc_meta_t *p_meta, const vlc_meta_t *p_program_meta )
 {
     es_out_sys_t    *p_sys = p_out->p_sys;
     input_thread_t  *p_input = p_sys->p_input;
     input_item_t *p_item = input_GetItem( p_input );
 
-    if( vlc_meta_Get( p_meta, vlc_meta_Title ) != NULL )
-        input_item_SetName( p_item, vlc_meta_Get( p_meta, vlc_meta_Title ) );
-
-    char *psz_arturl = NULL;
-    if( vlc_meta_Get( p_item->p_meta, vlc_meta_ArtworkURL ) != NULL )
-        psz_arturl = input_item_GetArtURL( p_item ); /* save value */
-
     vlc_mutex_lock( &p_item->lock );
-    vlc_meta_Merge( p_item->p_meta, p_meta );
+    if( p_meta )
+        vlc_meta_Merge( p_item->p_meta, p_meta );
     vlc_mutex_unlock( &p_item->lock );
 
-    if( psz_arturl != NULL ) /* restore/favor previously set item art URL */
+    /* Check program meta to not override GROUP_META values */
+    if( p_meta && (!p_program_meta || vlc_meta_Get( p_program_meta, vlc_meta_Title ) == NULL) &&
+         vlc_meta_Get( p_meta, vlc_meta_Title ) != NULL )
+        input_item_SetName( p_item, vlc_meta_Get( p_meta, vlc_meta_Title ) );
+
+    const char *psz_arturl = NULL;
+    char *psz_alloc = NULL;
+
+    if( p_program_meta )
+        psz_arturl = vlc_meta_Get( p_program_meta, vlc_meta_ArtworkURL );
+    if( psz_arturl == NULL && p_meta )
+        psz_arturl = vlc_meta_Get( p_meta, vlc_meta_ArtworkURL );
+
+    if( psz_arturl == NULL ) /* restore/favor previously set item art URL */
+        psz_arturl = psz_alloc = input_item_GetArtURL( p_item );
+
+    if( psz_arturl != NULL )
         input_item_SetArtURL( p_item, psz_arturl );
-    else
-        psz_arturl = input_item_GetArtURL( p_item );
 
     if( psz_arturl != NULL && !strncmp( psz_arturl, "attachment://", 13 ) )
     {   /* Clear art cover if streaming out.
@@ -1501,12 +1512,19 @@ static void EsOutMeta( es_out_t *p_out, const vlc_meta_t *p_meta )
         else
             input_ExtractAttachmentAndCacheArt( p_input, psz_arturl + 13 );
     }
-    free( psz_arturl );
+    free( psz_alloc );
 
     input_item_SetPreparsed( p_item, true );
 
     input_SendEventMeta( p_input );
     /* TODO handle sout meta ? */
+}
+
+static void EsOutGlobalMeta( es_out_t *p_out, const vlc_meta_t *p_meta )
+{
+    es_out_sys_t    *p_sys = p_out->p_sys;
+    EsOutMeta( p_out, p_meta,
+               (p_sys->p_pgrm && p_sys->p_pgrm->p_meta) ? p_sys->p_pgrm->p_meta : NULL );
 }
 
 static es_out_id_t *EsOutAddSlave( es_out_t *out, const es_format_t *fmt, es_out_id_t *p_master )
@@ -1613,8 +1631,8 @@ static es_out_id_t *EsOutAddSlave( es_out_t *out, const es_format_t *fmt, es_out
     es->psz_language_code = LanguageGetCode( es->fmt.psz_language );
     es->p_dec = NULL;
     es->p_dec_record = NULL;
-    for( i = 0; i < 4; i++ )
-        es->pb_cc_present[i] = false;
+    es->cc.type = 0;
+    es->cc.i_bitmap = 0;
     es->p_master = p_master;
 
     TAB_APPEND( p_sys->i_es, p_sys->es, es );
@@ -1648,9 +1666,9 @@ static bool EsIsSelected( es_out_id_t *es )
         bool b_decode = false;
         if( es->p_master->p_dec )
         {
-            int i_channel = EsOutGetClosedCaptionsChannel( es->fmt.i_original_fourcc );
-            if( i_channel != -1 )
-                input_DecoderGetCcState( es->p_master->p_dec, &b_decode, i_channel );
+            int i_channel = EsOutGetClosedCaptionsChannel( &es->fmt );
+            input_DecoderGetCcState( es->p_master->p_dec, es->fmt.i_codec,
+                                     i_channel, &b_decode );
         }
         return b_decode;
     }
@@ -1714,8 +1732,11 @@ static void EsSelect( es_out_t *out, es_out_id_t *es )
         if( !es->p_master->p_dec )
             return;
 
-        i_channel = EsOutGetClosedCaptionsChannel( es->fmt.i_original_fourcc );
-        if( i_channel == -1 || input_DecoderSetCcState( es->p_master->p_dec, true, i_channel ) )
+        i_channel = EsOutGetClosedCaptionsChannel( &es->fmt );
+
+        if( i_channel == -1 ||
+            input_DecoderSetCcState( es->p_master->p_dec, es->fmt.i_codec,
+                                     i_channel, true ) )
             return;
     }
     else
@@ -1760,6 +1781,34 @@ static void EsSelect( es_out_t *out, es_out_id_t *es )
     input_SendEventTeletextSelect( p_input, EsFmtIsTeletext( &es->fmt ) ? es->i_id : -1 );
 }
 
+static void EsDeleteCCChannels( es_out_t *out, es_out_id_t *parent )
+{
+    es_out_sys_t   *p_sys = out->p_sys;
+    input_thread_t *p_input = p_sys->p_input;
+
+    if( parent->cc.type == 0 )
+        return;
+
+    const int i_spu_id = var_GetInteger( p_input, "spu-es");
+
+    uint64_t i_bitmap = parent->cc.i_bitmap;
+    for( int i = 0; i_bitmap > 0; i++, i_bitmap >>= 1 )
+    {
+        if( (i_bitmap & 1) == 0 || !parent->cc.pp_es[i] )
+            continue;
+
+        if( i_spu_id == parent->cc.pp_es[i]->i_id )
+        {
+            /* Force unselection of the CC */
+            input_SendEventEsSelect( p_input, SPU_ES, -1 );
+        }
+        EsOutDel( out, parent->cc.pp_es[i] );
+    }
+
+    parent->cc.i_bitmap = 0;
+    parent->cc.type = 0;
+}
+
 static void EsUnselect( es_out_t *out, es_out_id_t *es, bool b_update )
 {
     es_out_sys_t   *p_sys = out->p_sys;
@@ -1775,29 +1824,15 @@ static void EsUnselect( es_out_t *out, es_out_id_t *es, bool b_update )
     {
         if( es->p_master->p_dec )
         {
-            int i_channel = EsOutGetClosedCaptionsChannel( es->fmt.i_original_fourcc );
+            int i_channel = EsOutGetClosedCaptionsChannel( &es->fmt );
             if( i_channel != -1 )
-                input_DecoderSetCcState( es->p_master->p_dec, false, i_channel );
+                input_DecoderSetCcState( es->p_master->p_dec, es->fmt.i_codec,
+                                         i_channel, false );
         }
     }
     else
     {
-        const int i_spu_id = var_GetInteger( p_input, "spu-es");
-        int i;
-        for( i = 0; i < 4; i++ )
-        {
-            if( !es->pb_cc_present[i] || !es->pp_cc_es[i] )
-                continue;
-
-            if( i_spu_id == es->pp_cc_es[i]->i_id )
-            {
-                /* Force unselection of the CC */
-                input_SendEventEsSelect( p_input, SPU_ES, -1 );
-            }
-            EsOutDel( out, es->pp_cc_es[i] );
-
-            es->pb_cc_present[i] = false;
-        }
+        EsDeleteCCChannels( out, es );
         EsDestroyDecoder( out, es );
     }
 
@@ -1830,10 +1865,19 @@ static void EsOutSelect( es_out_t *out, es_out_id_t *es, bool b_force )
         return;
     }
 
+    bool b_auto_unselect = p_esprops && p_sys->i_mode == ES_OUT_MODE_AUTO &&
+                           p_esprops->e_policy == ES_OUT_ES_POLICY_EXCLUSIVE &&
+                           p_esprops->p_main_es && p_esprops->p_main_es != es;
+
     if( p_sys->i_mode == ES_OUT_MODE_ALL || b_force )
     {
         if( !EsIsSelected( es ) )
+        {
+            if( b_auto_unselect )
+                EsUnselect( out, p_esprops->p_main_es, false );
+
             EsSelect( out, es );
+        }
     }
     else if( p_sys->i_mode == ES_OUT_MODE_PARTIAL )
     {
@@ -1934,22 +1978,56 @@ static void EsOutSelect( es_out_t *out, es_out_id_t *es, bool b_force )
         }
 
         if( wanted_es == es && !EsIsSelected( es ) )
+        {
+            if( b_auto_unselect )
+                EsUnselect( out, p_esprops->p_main_es, false );
+
             EsSelect( out, es );
+        }
     }
 
     /* FIXME TODO handle priority here */
-    if( p_esprops && EsIsSelected( es ) )
+    if( p_esprops && p_sys->i_mode == ES_OUT_MODE_AUTO && EsIsSelected( es ) )
+        p_esprops->p_main_es = es;
+}
+
+static void EsOutCreateCCChannels( es_out_t *out, vlc_fourcc_t codec, uint64_t i_bitmap,
+                                   const char *psz_descfmt, es_out_id_t *parent )
+{
+    es_out_sys_t   *p_sys = out->p_sys;
+    input_thread_t *p_input = p_sys->p_input;
+
+    /* Only one type of captions is allowed ! */
+    if( parent->cc.type && parent->cc.type != codec )
+        return;
+
+    uint64_t i_existingbitmap = parent->cc.i_bitmap;
+    for( int i = 0; i_bitmap > 0; i++, i_bitmap >>= 1, i_existingbitmap >>= 1 )
     {
-        if( p_sys->i_mode == ES_OUT_MODE_AUTO )
-        {
-            if( p_esprops->e_policy == ES_OUT_ES_POLICY_EXCLUSIVE &&
-                p_esprops->p_main_es &&
-                p_esprops->p_main_es != es )
-            {
-                EsUnselect( out, p_esprops->p_main_es, false );
-            }
-            p_esprops->p_main_es = es;
-        }
+        es_format_t fmt;
+
+        if( (i_bitmap & 1) == 0 || (i_existingbitmap & 1) )
+            continue;
+
+        msg_Dbg( p_input, "Adding CC track %d for es[%d]", 1+i, parent->i_id );
+
+        es_format_Init( &fmt, SPU_ES, codec );
+        fmt.subs.cc.i_channel = i;
+        fmt.i_group = parent->fmt.i_group;
+        if( asprintf( &fmt.psz_description, psz_descfmt, 1 + i ) == -1 )
+            fmt.psz_description = NULL;
+
+        es_out_id_t **pp_es = &parent->cc.pp_es[i];
+        *pp_es = EsOutAddSlave( out, &fmt, parent );
+        es_format_Clean( &fmt );
+
+        /* */
+        parent->cc.i_bitmap |= (1ULL << i);
+        parent->cc.type = codec;
+
+        /* Enable if user specified on command line */
+        if (p_sys->sub.i_channel == i)
+            EsOutSelect(out, *pp_es, true);
     }
 }
 
@@ -1965,26 +2043,22 @@ static int EsOutSend( es_out_t *out, es_out_id_t *es, block_t *p_block )
     es_out_sys_t   *p_sys = out->p_sys;
     input_thread_t *p_input = p_sys->p_input;
 
-    if( libvlc_stats( p_input ) )
-    {
-        uint64_t i_total;
+    assert( p_block->p_next == NULL );
 
-        vlc_mutex_lock( &input_priv(p_input)->counters.counters_lock );
-        stats_Update( input_priv(p_input)->counters.p_demux_read,
-                      p_block->i_buffer, &i_total );
-        stats_Update( input_priv(p_input)->counters.p_demux_bitrate, i_total, NULL );
+    struct input_stats *stats = input_priv(p_input)->stats;
+    if( stats != NULL )
+    {
+        input_rate_Add( &stats->demux_bitrate, p_block->i_buffer );
 
         /* Update number of corrupted data packats */
         if( p_block->i_flags & BLOCK_FLAG_CORRUPTED )
-        {
-            stats_Update( input_priv(p_input)->counters.p_demux_corrupted, 1, NULL );
-        }
+            atomic_fetch_add_explicit(&stats->demux_corrupted, 1,
+                                      memory_order_relaxed);
+
         /* Update number of discontinuities */
         if( p_block->i_flags & BLOCK_FLAG_DISCONTINUITY )
-        {
-            stats_Update( input_priv(p_input)->counters.p_demux_discontinuity, 1, NULL );
-        }
-        vlc_mutex_unlock( &input_priv(p_input)->counters.counters_lock );
+            atomic_fetch_add_explicit(&stats->demux_discontinuity, 1,
+                                      memory_order_relaxed);
     }
 
     vlc_mutex_lock( &p_sys->lock );
@@ -1996,7 +2070,7 @@ static int EsOutSend( es_out_t *out, es_out_id_t *es, block_t *p_block )
         if( p_block->i_pts <= VLC_TS_INVALID )
             i_date = p_block->i_dts;
 
-        if( i_date < p_sys->i_preroll_end )
+        if( i_date + p_block->i_length < p_sys->i_preroll_end )
             p_block->i_flags |= BLOCK_FLAG_PREROLL;
     }
 
@@ -2048,32 +2122,14 @@ static int EsOutSend( es_out_t *out, es_out_id_t *es, block_t *p_block )
     }
 
     /* Check CC status */
-    bool pb_cc[4];
+    decoder_cc_desc_t desc;
 
-    input_DecoderIsCcPresent( es->p_dec, pb_cc );
-    for( int i = 0; i < 4; i++ )
-    {
-        es_format_t fmt;
-
-        if(  es->pb_cc_present[i] || !pb_cc[i] )
-            continue;
-        msg_Dbg( p_input, "Adding CC track %d for es[%d]", 1+i, es->i_id );
-
-        es_format_Init( &fmt, SPU_ES, EsOutFourccClosedCaptions[i] );
-        fmt.i_group = es->fmt.i_group;
-        if( asprintf( &fmt.psz_description,
-                      _("Closed captions %u"), 1 + i ) == -1 )
-            fmt.psz_description = NULL;
-        es->pp_cc_es[i] = EsOutAddSlave( out, &fmt, es );
-        es_format_Clean( &fmt );
-
-        /* */
-        es->pb_cc_present[i] = true;
-
-        /* Enable if user specified on command line */
-        if (p_sys->sub.i_channel == i)
-            EsOutSelect(out, es->pp_cc_es[i], true);
-    }
+    input_DecoderGetCcDesc( es->p_dec, &desc );
+    if( var_InheritInteger( p_input, "captions" ) == 708 )
+        EsOutCreateCCChannels( out, VLC_CODEC_CEA708, desc.i_708_channels,
+                               _("DTVCC Closed captions %u"), es );
+    EsOutCreateCCChannels( out, VLC_CODEC_CEA608, desc.i_608_channels,
+                           _("Closed captions %u"), es );
 
     vlc_mutex_unlock( &p_sys->lock );
 
@@ -2098,6 +2154,7 @@ static void EsOutDel( es_out_t *out, es_out_id_t *es )
     {   /* FIXME: This might hold the ES output caller (i.e. the demux), and
          * the corresponding thread (typically the input thread), for a little
          * bit too long if the ES is deleted in the middle of a stream. */
+        input_DecoderDrain( es->p_dec );
         while( !input_Stopped(p_sys->p_input) && !p_sys->b_buffering )
         {
             if( input_DecoderIsEmpty( es->p_dec ) &&
@@ -2142,7 +2199,16 @@ static void EsOutDel( es_out_t *out, es_out_id_t *es )
         for( i = 0; i < p_sys->i_es; i++ )
         {
             if( es->fmt.i_cat == p_sys->es[i]->fmt.i_cat )
-                EsOutSelect( out, p_sys->es[i], false );
+            {
+                if( EsIsSelected(p_sys->es[i]) )
+                {
+                    input_SendEventEsSelect( p_sys->p_input, es->fmt.i_cat, p_sys->es[i]->i_id );
+                    if( p_esprops->p_main_es == NULL )
+                        p_esprops->p_main_es = p_sys->es[i];
+                }
+                else
+                    EsOutSelect( out, p_sys->es[i], false );
+            }
         }
     }
 
@@ -2256,23 +2322,24 @@ static int EsOutControlLocked( es_out_t *out, int i_query, va_list args )
     case ES_OUT_SET_ES:
     case ES_OUT_RESTART_ES:
     {
+#define IGNORE_ES DATA_ES
         es_out_id_t *es = va_arg( args, es_out_id_t * );
 
-        int i_cat;
+        enum es_format_category_e i_cat;
         if( es == NULL )
             i_cat = UNKNOWN_ES;
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+AUDIO_ES) )
+        else if( es == es_cat + AUDIO_ES )
             i_cat = AUDIO_ES;
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+VIDEO_ES) )
+        else if( es == es_cat + VIDEO_ES )
             i_cat = VIDEO_ES;
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+SPU_ES) )
+        else if( es == es_cat + SPU_ES )
             i_cat = SPU_ES;
         else
-            i_cat = -1;
+            i_cat = IGNORE_ES;
 
         for( int i = 0; i < p_sys->i_es; i++ )
         {
-            if( i_cat == -1 )
+            if( i_cat == IGNORE_ES )
             {
                 if( es == p_sys->es[i] )
                 {
@@ -2313,6 +2380,41 @@ static int EsOutControlLocked( es_out_t *out, int i_query, va_list args )
         }
         return VLC_SUCCESS;
     }
+    case ES_OUT_STOP_ALL_ES:
+    {
+        int *selected_es = vlc_alloc(p_sys->i_es + 1, sizeof(int));
+        if (!selected_es)
+            return VLC_ENOMEM;
+        selected_es[0] = p_sys->i_es;
+        for( int i = 0; i < p_sys->i_es; i++ )
+        {
+            if( EsIsSelected( p_sys->es[i] ) )
+            {
+                EsDestroyDecoder( out, p_sys->es[i] );
+                selected_es[i + 1] = p_sys->es[i]->i_id;
+            }
+            else
+                selected_es[i + 1] = -1;
+        }
+        *va_arg( args, void **) = selected_es;
+        return VLC_SUCCESS;
+    }
+    case ES_OUT_START_ALL_ES:
+    {
+        int *selected_es = va_arg( args, void * );
+        int count = selected_es[0];
+        for( int i = 0; i < count; ++i )
+        {
+            int i_id = selected_es[i + 1];
+            if( i_id != -1 )
+            {
+                es_out_id_t *p_es = EsOutGetFromID( out, i_id );
+                EsCreateDecoder( out, p_es );
+            }
+        }
+        free(selected_es);
+        return VLC_SUCCESS;
+    }
 
     case ES_OUT_SET_ES_DEFAULT:
     {
@@ -2324,15 +2426,15 @@ static int EsOutControlLocked( es_out_t *out, int i_query, va_list args )
             /*p_sys->i_default_audio_id = -1;*/
             p_sys->sub.i_demux_id = -1;
         }
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+AUDIO_ES) )
+        else if( es == es_cat + AUDIO_ES )
         {
             /*p_sys->i_default_video_id = -1;*/
         }
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+VIDEO_ES) )
+        else if( es == es_cat + VIDEO_ES )
         {
             /*p_sys->i_default_audio_id = -1;*/
         }
-        else if( es == (es_out_id_t*)((uint8_t*)NULL+SPU_ES) )
+        else if( es == es_cat + SPU_ES )
         {
             p_sys->sub.i_demux_id = -1;
         }
@@ -2543,7 +2645,7 @@ static int EsOutControlLocked( es_out_t *out, int i_query, va_list args )
     {
         const vlc_meta_t *p_meta = va_arg( args, const vlc_meta_t * );
 
-        EsOutMeta( out, p_meta );
+        EsOutGlobalMeta( out, p_meta );
         return VLC_SUCCESS;
     }
 
@@ -2765,8 +2867,16 @@ static int EsOutControlLocked( es_out_t *out, int i_query, va_list args )
         return VLC_SUCCESS;
     }
 
+    case ES_OUT_POST_SUBNODE:
+    {
+        input_item_node_t *node = va_arg(args, input_item_node_t *);
+        input_item_node_PostAndDelete(node);
+        return VLC_SUCCESS;
+    }
+
     default:
-        msg_Err( p_sys->p_input, "unknown query in es_out_Control" );
+        msg_Err( p_sys->p_input, "unknown query 0x%x in %s", i_query,
+                 __func__  );
         return VLC_EGENERIC;
     }
 }
@@ -2921,7 +3031,6 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
     es_out_sys_t   *p_sys = out->p_sys;
     input_thread_t *p_input = p_sys->p_input;
     const es_format_t *p_fmt_es = &es->fmt;
-    lldiv_t         div;
 
     if( es->fmt.i_cat == fmt->i_cat )
     {
@@ -2936,10 +3045,11 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
             update.psz_language = es->fmt.psz_language;
         if (update.psz_description == NULL)
             update.psz_description = es->fmt.psz_description;
-        if (update.subs.psz_encoding == NULL)
-            update.subs.psz_encoding = es->fmt.subs.psz_encoding;
-        if (update.subs.p_style == NULL)
-            update.subs.p_style = es->fmt.subs.p_style;
+        if (update.i_cat == SPU_ES)
+        {
+            if (update.subs.psz_encoding == NULL)
+                update.subs.psz_encoding = es->fmt.subs.psz_encoding;
+        }
         if (update.i_extra_languages == 0)
         {
             assert(update.p_extra_languages == NULL);
@@ -2968,34 +3078,14 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
         return;
 
     /* Add information */
-    const char *psz_type;
-    switch( fmt->i_cat )
-    {
-    case AUDIO_ES:
-        psz_type = _("Audio");
-        break;
-    case VIDEO_ES:
-        psz_type = _("Video");
-        break;
-    case SPU_ES:
-        psz_type = _("Subtitle");
-        break;
-    default:
-        psz_type = NULL;
-        break;
-    }
-
-    if( psz_type )
-        info_category_AddInfo( p_cat, _("Type"), "%s", psz_type );
-
     if( es->i_meta_id != es->i_id )
         info_category_AddInfo( p_cat, _("Original ID"),
                        "%d", es->i_id );
 
-    const char *psz_codec_description =
-        vlc_fourcc_GetDescription( p_fmt_es->i_cat, p_fmt_es->i_codec );
     const vlc_fourcc_t i_codec_fourcc = ( p_fmt_es->i_original_fourcc )?
                                p_fmt_es->i_original_fourcc : p_fmt_es->i_codec;
+    const char *psz_codec_description =
+        vlc_fourcc_GetDescription( p_fmt_es->i_cat, i_codec_fourcc );
     if( psz_codec_description && *psz_codec_description )
         info_category_AddInfo( p_cat, _("Codec"), "%s (%.4s)",
                                psz_codec_description, (char*)&i_codec_fourcc );
@@ -3017,7 +3107,7 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
 
         if( fmt->audio.i_physical_channels )
             info_category_AddInfo( p_cat, _("Channels"), "%s",
-                                   _( aout_FormatPrintChannels( &fmt->audio ) ) );
+                vlc_gettext( aout_FormatPrintChannels( &fmt->audio ) ) );
 
         if( fmt->audio.i_rate != 0 )
         {
@@ -3072,15 +3162,13 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
        if( fmt->video.i_frame_rate > 0 &&
            fmt->video.i_frame_rate_base > 0 )
        {
-           div = lldiv( (float)fmt->video.i_frame_rate /
-                               fmt->video.i_frame_rate_base * 1000000,
-                               1000000 );
-           if( div.rem > 0 )
-               info_category_AddInfo( p_cat, _("Frame rate"), "%"PRId64".%06u",
-                                      div.quot, (unsigned int )div.rem );
+           if( fmt->video.i_frame_rate_base == 1 )
+               info_category_AddInfo( p_cat, _("Frame rate"), "%u",
+                                      fmt->video.i_frame_rate );
            else
-               info_category_AddInfo( p_cat, _("Frame rate"), "%"PRId64,
-                                      div.quot );
+               info_category_AddInfo( p_cat, _("Frame rate"), "%.6f",
+                                      (double)fmt->video.i_frame_rate
+                                      / (double)fmt->video.i_frame_rate_base );
        }
        if( fmt->i_codec != p_fmt_es->i_codec )
        {
@@ -3098,66 +3186,74 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
                N_("Left bottom"), N_("Right top"),
            };
            info_category_AddInfo( p_cat, _("Orientation"), "%s",
-                                  _(orient_names[fmt->video.orientation]) );
+               vlc_gettext(orient_names[fmt->video.orientation]) );
        }
        if( fmt->video.primaries != COLOR_PRIMARIES_UNDEF )
        {
-           static const char *primaries_names[] = { N_("Undefined"),
-               N_("ITU-R BT.601 (525 lines, 60 Hz)"),
-               N_("ITU-R BT.601 (625 lines, 50 Hz)"),
-               "ITU-R BT.709",
-               "ITU-R BT.2020",
-               "DCI/P3 D65",
-               "ITU-R BT.470 M",
+           static const char primaries_names[][32] = {
+               [COLOR_PRIMARIES_UNDEF] = N_("Undefined"),
+               [COLOR_PRIMARIES_BT601_525] =
+                   N_("ITU-R BT.601 (525 lines, 60 Hz)"),
+               [COLOR_PRIMARIES_BT601_625] =
+                   N_("ITU-R BT.601 (625 lines, 50 Hz)"),
+               [COLOR_PRIMARIES_BT709] = "ITU-R BT.709",
+               [COLOR_PRIMARIES_BT2020] = "ITU-R BT.2020",
+               [COLOR_PRIMARIES_DCI_P3] = "DCI/P3 D65",
+               [COLOR_PRIMARIES_BT470_M] = "ITU-R BT.470 M",
            };
-           if( fmt->video.primaries < ARRAY_SIZE(primaries_names) )
-                info_category_AddInfo( p_cat, _("Color primaries"), "%s",
-                                      _(primaries_names[fmt->video.primaries]) );
+           static_assert(ARRAY_SIZE(primaries_names) == COLOR_PRIMARIES_MAX+1,
+                         "Color primiaries table mismatch");
+           info_category_AddInfo( p_cat, _("Color primaries"), "%s",
+               vlc_gettext(primaries_names[fmt->video.primaries]) );
        }
        if( fmt->video.transfer != TRANSFER_FUNC_UNDEF )
        {
-           static const char *func_names[] = { N_("Undefined"),
-               N_("Linear"),
-               "sRGB",
-               "ITU-R BT.470 BG",
-               "ITU-R BT.470 M",
-               "ITU-R BT.709, ITU-R BT.2020",
-               "SMPTE ST2084",
-               "SMPTE 240M",
-               "Hybrid Log-Gamma",
+           static const char func_names[][20] = {
+               [TRANSFER_FUNC_UNDEF] = N_("Undefined"),
+               [TRANSFER_FUNC_LINEAR] = N_("Linear"),
+               [TRANSFER_FUNC_SRGB] = "sRGB",
+               [TRANSFER_FUNC_BT470_BG] = "ITU-R BT.470 BG",
+               [TRANSFER_FUNC_BT470_M] = "ITU-R BT.470 M",
+               [TRANSFER_FUNC_BT709] = "ITU-R BT.709",
+               [TRANSFER_FUNC_SMPTE_ST2084] = "SMPTE ST2084",
+               [TRANSFER_FUNC_SMPTE_240] = "SMPTE 240M",
+               [TRANSFER_FUNC_HLG] = N_("Hybrid Log-Gamma"),
            };
-           if( fmt->video.transfer < ARRAY_SIZE(func_names) )
-                info_category_AddInfo( p_cat, _("Color transfer function"), "%s",
-                                      _(func_names[fmt->video.transfer]) );
+           static_assert(ARRAY_SIZE(func_names) == TRANSFER_FUNC_MAX+1,
+                         "Transfer functions table mismatch");
+           info_category_AddInfo( p_cat, _("Color transfer function"), "%s",
+               vlc_gettext(func_names[fmt->video.transfer]) );
        }
        if( fmt->video.space != COLOR_SPACE_UNDEF )
        {
-           static const char *space_names[] = { N_("Undefined"),
-               "ITU-R BT.601",
-               "ITU-R BT.709",
-               "ITU-R BT.2020",
+           static const char space_names[][16] = {
+               [COLOR_SPACE_UNDEF] = N_("Undefined"),
+               [COLOR_SPACE_BT601] = "ITU-R BT.601",
+               [COLOR_SPACE_BT709] = "ITU-R BT.709",
+               [COLOR_SPACE_BT2020] = "ITU-R BT.2020",
            };
-           static const char *range_names[] = {
-               N_("Limited Range"),
-               N_("Full Range"),
-           };
-           if( fmt->video.space < ARRAY_SIZE(space_names) )
-                info_category_AddInfo( p_cat, _("Color space"), "%s %s",
-                                      _(space_names[fmt->video.space]),
-                                      _(range_names[fmt->video.b_color_range_full]) );
+           static_assert(ARRAY_SIZE(space_names) == COLOR_SPACE_MAX+1,
+                         "Color space table mismatch");
+           info_category_AddInfo( p_cat, _("Color space"), _("%s %s Range"),
+               vlc_gettext(space_names[fmt->video.space]),
+               vlc_gettext(fmt->video.b_color_range_full
+                           ? N_("Full") : N_("Limited")) );
        }
        if( fmt->video.chroma_location != CHROMA_LOCATION_UNDEF )
        {
-           static const char *c_loc_names[] = { N_("Undefined"),
-               N_("Left"),
-               N_("Center"),
-               N_("Top Left"),
-               N_("Top Center"),
-               N_("Bottom Left"),
-               N_("Bottom Center"),
+           static const char c_loc_names[][16] = {
+               [CHROMA_LOCATION_UNDEF] = N_("Undefined"),
+               [CHROMA_LOCATION_LEFT] = N_("Left"),
+               [CHROMA_LOCATION_CENTER] = N_("Center"),
+               [CHROMA_LOCATION_TOP_LEFT] = N_("Top Left"),
+               [CHROMA_LOCATION_TOP_CENTER] = N_("Top Center"),
+               [CHROMA_LOCATION_BOTTOM_LEFT] =N_("Bottom Left"),
+               [CHROMA_LOCATION_BOTTOM_CENTER] = N_("Bottom Center"),
            };
+           static_assert(ARRAY_SIZE(c_loc_names) == CHROMA_LOCATION_MAX+1,
+                         "Chroma location table mismatch");
            info_category_AddInfo( p_cat, _("Chroma location"), "%s",
-                   _(c_loc_names[fmt->video.chroma_location]) );
+               vlc_gettext(c_loc_names[fmt->video.chroma_location]) );
        }
        if( fmt->video.projection_mode != PROJECTION_MODE_RECTANGULAR )
        {
@@ -3177,30 +3273,28 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
                vlc_assert_unreachable();
                break;
            }
-           info_category_AddInfo( p_cat, _("Projection"), "%s", _(psz_loc_name) );
+           info_category_AddInfo( p_cat, _("Projection"), "%s",
+                                  vlc_gettext(psz_loc_name) );
 
-           info_category_AddInfo( p_cat, _("Yaw"), "%.2f",
-                                  fmt->video.pose.f_yaw_degrees );
-           info_category_AddInfo( p_cat, _("Pitch"), "%.2f",
-                                  fmt->video.pose.f_pitch_degrees );
-           info_category_AddInfo( p_cat, _("Roll"), "%.2f",
-                                  fmt->video.pose.f_roll_degrees );
-           info_category_AddInfo( p_cat, _("Field of view"), "%.2f",
-                                  fmt->video.pose.f_fov_degrees );
+           info_category_AddInfo( p_cat, vlc_pgettext("ViewPoint", "Yaw"),
+                                  "%.2f", fmt->video.pose.yaw );
+           info_category_AddInfo( p_cat, vlc_pgettext("ViewPoint", "Pitch"),
+                                  "%.2f", fmt->video.pose.pitch );
+           info_category_AddInfo( p_cat, vlc_pgettext("ViewPoint", "Roll"),
+                                  "%.2f", fmt->video.pose.roll );
+           info_category_AddInfo( p_cat,
+                                  vlc_pgettext("ViewPoint", "Field of view"),
+                                  "%.2f", fmt->video.pose.fov );
        }
        if ( fmt->video.mastering.max_luminance )
        {
-           float luminance = (float)fmt->video.mastering.max_luminance /
-                                    10000.f;
-           info_category_AddInfo( p_cat, _("Max luminance"), "%.4f cd/m²",
-                                  luminance );
+           info_category_AddInfo( p_cat, _("Max. luminance"), "%.4f cd/m²",
+               fmt->video.mastering.max_luminance / 10000.f );
        }
        if ( fmt->video.mastering.min_luminance )
        {
-           float luminance = (float)fmt->video.mastering.min_luminance /
-                                    10000.f;
-           info_category_AddInfo( p_cat, _("Min luminance"), "%.4f cd/m²",
-                                  luminance );
+           info_category_AddInfo( p_cat, _("Min. luminance"), "%.4f cd/m²",
+               fmt->video.mastering.min_luminance / 10000.f );
        }
        if ( fmt->video.mastering.primaries[4] &&
             fmt->video.mastering.primaries[5] )
@@ -3232,12 +3326,12 @@ static void EsOutUpdateInfo( es_out_t *out, es_out_id_t *es, const es_format_t *
        }
        if ( fmt->video.lighting.MaxCLL )
        {
-           info_category_AddInfo( p_cat, _("MaxCLL"), "%d cd/m²",
+           info_category_AddInfo( p_cat, "MaxCLL", "%d cd/m²",
                                   fmt->video.lighting.MaxCLL );
        }
        if ( fmt->video.lighting.MaxFALL )
        {
-           info_category_AddInfo( p_cat, _("MaxFALL"), "%d cd/m²",
+           info_category_AddInfo( p_cat, "MaxFALL", "%d cd/m²",
                                   fmt->video.lighting.MaxFALL );
        }
        break;

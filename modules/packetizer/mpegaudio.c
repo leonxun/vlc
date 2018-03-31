@@ -62,7 +62,7 @@ struct decoder_sys_t
     mtime_t i_pts;
 
     int i_frame_size, i_free_frame_size;
-    unsigned int i_channels_conf, i_channels;
+    unsigned int i_channels_conf, i_chan_mode, i_channels;
     unsigned int i_rate, i_max_frame_size, i_frame_length;
     unsigned int i_layer, i_bit_rate;
 
@@ -97,7 +97,7 @@ static void Flush( decoder_t *p_dec )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    date_Set( &p_sys->end_date, 0 );
+    date_Set( &p_sys->end_date, VLC_TS_INVALID );
     p_sys->i_state = STATE_NOSYNC;
     block_BytestreamEmpty( &p_sys->bytestream );
     p_sys->b_discontinuity = true;
@@ -110,23 +110,27 @@ static uint8_t *GetOutBuffer( decoder_t *p_dec, block_t **pp_out_buffer )
 {
     decoder_sys_t *p_sys = p_dec->p_sys;
 
-    if( p_dec->fmt_out.audio.i_rate != p_sys->i_rate )
+    if( p_dec->fmt_out.audio.i_rate != p_sys->i_rate ||
+        date_Get( &p_sys->end_date ) == VLC_TS_INVALID )
     {
         msg_Dbg( p_dec, "MPGA channels:%d samplerate:%d bitrate:%d",
                   p_sys->i_channels, p_sys->i_rate, p_sys->i_bit_rate );
 
-        date_Init( &p_sys->end_date, p_sys->i_rate, 1 );
+        if( p_sys->end_date.i_divider_num == 0 )
+            date_Init( &p_sys->end_date, p_sys->i_rate, 1 );
+        else
+            date_Change( &p_sys->end_date, p_sys->i_rate, 1 );
         date_Set( &p_sys->end_date, p_sys->i_pts );
     }
 
+    p_dec->fmt_out.i_profile        = p_sys->i_layer;
     p_dec->fmt_out.audio.i_rate     = p_sys->i_rate;
     p_dec->fmt_out.audio.i_channels = p_sys->i_channels;
     p_dec->fmt_out.audio.i_frame_length = p_sys->i_frame_length;
     p_dec->fmt_out.audio.i_bytes_per_frame = p_sys->i_max_frame_size;
 
-    p_dec->fmt_out.audio.i_original_channels = p_sys->i_channels_conf;
-    p_dec->fmt_out.audio.i_physical_channels =
-        p_sys->i_channels_conf & AOUT_CHAN_PHYSMASK;
+    p_dec->fmt_out.audio.i_physical_channels = p_sys->i_channels_conf;
+    p_dec->fmt_out.audio.i_chan_mode = p_sys->i_chan_mode;
 
     p_dec->fmt_out.i_bitrate = p_sys->i_bit_rate * 1000;
 
@@ -147,6 +151,7 @@ static uint8_t *GetOutBuffer( decoder_t *p_dec, block_t **pp_out_buffer )
  *****************************************************************************/
 static int SyncInfo( uint32_t i_header, unsigned int * pi_channels,
                      unsigned int * pi_channels_conf,
+                     unsigned int * pi_chan_mode,
                      unsigned int * pi_sample_rate, unsigned int * pi_bit_rate,
                      unsigned int * pi_frame_length,
                      unsigned int * pi_max_frame_size, unsigned int * pi_layer)
@@ -201,6 +206,7 @@ static int SyncInfo( uint32_t i_header, unsigned int * pi_channels,
     i_mode      = (i_header & 0xc0) >> 6;
     /* Modeext, copyright & original */
     i_emphasis  = i_header & 0x3;
+    *pi_chan_mode = 0;
 
     if( *pi_layer != 4 &&
         i_bitrate_index < 0x0f &&
@@ -209,15 +215,13 @@ static int SyncInfo( uint32_t i_header, unsigned int * pi_channels,
     {
         switch ( i_mode )
         {
+        case 2: /* dual-mono */
+            *pi_chan_mode = AOUT_CHANMODE_DUALMONO;
+            /* fall through */
         case 0: /* stereo */
         case 1: /* joint stereo */
             *pi_channels = 2;
             *pi_channels_conf = AOUT_CHAN_LEFT | AOUT_CHAN_RIGHT;
-            break;
-        case 2: /* dual-mono */
-            *pi_channels = 2;
-            *pi_channels_conf = AOUT_CHAN_LEFT | AOUT_CHAN_RIGHT
-                                | AOUT_CHAN_DUALMONO;
             break;
         case 3: /* mono */
             *pi_channels = 1;
@@ -340,6 +344,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 /* Need more data */
                 return NULL;
             }
+            /* fallthrough */
 
         case STATE_SYNC:
             /* New frame, set the Presentation Time Stamp */
@@ -358,6 +363,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 }
             }
             p_sys->i_state = STATE_HEADER;
+            /* fallthrough */
 
         case STATE_HEADER:
             /* Get MPGA frame header (MPGA_HEADER_SIZE bytes) */
@@ -375,13 +381,12 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             p_sys->i_frame_size = SyncInfo( i_header,
                                             &p_sys->i_channels,
                                             &p_sys->i_channels_conf,
+                                            &p_sys->i_chan_mode,
                                             &p_sys->i_rate,
                                             &p_sys->i_bit_rate,
                                             &p_sys->i_frame_length,
                                             &p_sys->i_max_frame_size,
                                             &p_sys->i_layer );
-
-            p_dec->fmt_in.i_profile = p_sys->i_layer;
 
             if( p_sys->i_frame_size == -1 )
             {
@@ -403,6 +408,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             }
 
             p_sys->i_state = STATE_NEXT_SYNC;
+            /* fallthrough */
 
         case STATE_NEXT_SYNC:
             /* Check if next expected frame contains the sync word */
@@ -423,7 +429,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
             {
                 /* Startcode is fine, let's try the header as an extra check */
                 int i_next_frame_size;
-                unsigned int i_next_channels, i_next_channels_conf;
+                unsigned int i_next_channels, i_next_stereo_mode, i_next_channels_conf;
                 unsigned int i_next_rate, i_next_bit_rate;
                 unsigned int i_next_frame_length, i_next_max_frame_size;
                 unsigned int i_next_layer;
@@ -434,6 +440,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 i_next_frame_size = SyncInfo( i_header,
                                               &i_next_channels,
                                               &i_next_channels_conf,
+                                              &i_next_stereo_mode,
                                               &i_next_rate,
                                               &i_next_bit_rate,
                                               &i_next_frame_length,
@@ -469,6 +476,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
 
                 /* Check info is in sync with previous one */
                 if( i_next_channels_conf != p_sys->i_channels_conf ||
+                    i_next_stereo_mode != p_sys->i_chan_mode ||
                     i_next_rate != p_sys->i_rate ||
                     i_next_layer != p_sys->i_layer ||
                     i_next_frame_length != p_sys->i_frame_length )
@@ -539,6 +547,7 @@ static block_t *DecodeBlock( decoder_t *p_dec, block_t **pp_block )
                 return NULL;
             }
             p_sys->i_state = STATE_SEND_DATA;
+            /* fallthrough */
 
         case STATE_SEND_DATA:
             if( !(p_buf = GetOutBuffer( p_dec, &p_out_buffer )) )
@@ -619,18 +628,18 @@ static int Open( vlc_object_t *p_this )
 
     /* Misc init */
     p_sys->i_state = STATE_NOSYNC;
-    date_Set( &p_sys->end_date, 0 );
+    date_Init( &p_sys->end_date, 1, 1 );
+    date_Set( &p_sys->end_date, VLC_TS_INVALID );
     block_BytestreamInit( &p_sys->bytestream );
     p_sys->i_pts = VLC_TS_INVALID;
     p_sys->b_discontinuity = false;
     p_sys->i_frame_size = 0;
 
-    p_sys->i_channels_conf = p_sys->i_channels = p_sys->i_rate =
-    p_sys->i_max_frame_size = p_sys->i_frame_length = p_sys->i_layer =
-    p_sys->i_bit_rate = 0;
+    p_sys->i_channels_conf = p_sys->i_chan_mode = p_sys->i_channels =
+    p_sys->i_rate = p_sys->i_max_frame_size = p_sys->i_frame_length =
+    p_sys->i_layer = p_sys->i_bit_rate = 0;
 
     /* Set output properties */
-    p_dec->fmt_out.i_cat = AUDIO_ES;
     p_dec->fmt_out.i_codec = VLC_CODEC_MPGA;
     p_dec->fmt_out.audio.i_rate = 0; /* So end_date gets initialized */
 

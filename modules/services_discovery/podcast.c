@@ -323,7 +323,7 @@ static void ParseUrls( services_discovery_t *p_sd, char *psz_urls )
 
             input_item_t *p_input;
             p_input = input_item_New( psz_urls, psz_urls );
-            input_item_AddOption( p_input, "demux=podcast", VLC_INPUT_OPTION_TRUSTED );
+            input_item_AddOption( p_input, "demux=directory", VLC_INPUT_OPTION_TRUSTED );
 
             TAB_APPEND( i_new_items, pp_new_items, p_input );
             services_discovery_AddItem( p_sd, p_input );
@@ -398,7 +398,7 @@ static void ParseRequest( services_discovery_t *p_sd )
 
             input_item_t *p_input;
             p_input = input_item_New( psz_request, psz_request );
-            input_item_AddOption( p_input, "demux=podcast", VLC_INPUT_OPTION_TRUSTED );
+            input_item_AddOption( p_input, "demux=directory", VLC_INPUT_OPTION_TRUSTED );
 
             TAB_APPEND( p_sys->i_items, p_sys->pp_items, p_input );
             services_discovery_AddItem( p_sd, p_input );
@@ -445,7 +445,7 @@ static void SaveUrls( services_discovery_t *p_sd )
         if( i < p_sys->i_urls - 1 ) strcat( psz_urls, "|" );
     }
 
-    config_PutPsz( p_sd, "podcast-urls", psz_urls );
+    config_PutPsz( "podcast-urls", psz_urls );
 
     free( psz_urls );
 }

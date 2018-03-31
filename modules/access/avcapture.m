@@ -59,7 +59,7 @@ vlc_module_begin ()
    set_category(CAT_INPUT)
    set_subcategory(SUBCAT_INPUT_ACCESS)
    add_shortcut("avcapture")
-   set_capability("access_demux", 10)
+   set_capability("access_demux", 0)
    set_callbacks(Open, Close)
 vlc_module_end ()
 
@@ -257,8 +257,7 @@ static int Open(vlc_object_t *p_this)
 
     char                    *psz_uid = NULL;
 
-    /* Only when selected */
-    if ( *p_demux->psz_access == '\0' )
+    if (p_demux->out == NULL)
         return VLC_EGENERIC;
 
     @autoreleasepool {
@@ -271,9 +270,6 @@ static int Open(vlc_object_t *p_this)
         /* Set up p_demux */
         p_demux->pf_demux = Demux;
         p_demux->pf_control = Control;
-        p_demux->info.i_update = 0;
-        p_demux->info.i_title = 0;
-        p_demux->info.i_seekpoint = 0;
 
         p_demux->p_sys = p_sys = calloc(1, sizeof(demux_sys_t));
         if ( !p_sys )
@@ -427,7 +423,7 @@ static int Demux(demux_t *p_demux)
             }
         }
         
-        es_out_Control(p_demux->out, ES_OUT_SET_PCR, p_block->i_pts);
+        es_out_SetPCR(p_demux->out, p_block->i_pts);
         es_out_Send(p_demux->out, p_sys->p_es_video, p_block);
         
     }

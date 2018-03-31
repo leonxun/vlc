@@ -41,6 +41,8 @@
 #ifdef _WIN32
 #   undef EAFNOSUPPORT
 #   define EAFNOSUPPORT WSAEAFNOSUPPORT
+#   include <wincrypt.h>
+#   include <iphlpapi.h>
 #else
 #   include <unistd.h>
 #   ifdef HAVE_NET_IF_H

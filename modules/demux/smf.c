@@ -59,7 +59,7 @@ static int32_t ReadVarInt (stream_t *s)
 typedef struct smf_track_t
 {
     uint64_t next;   /*< Time of next message (in term of pulses) */
-    int64_t  start;  /*< Start offset in the file */
+    uint64_t start;  /*< Start offset in the file */
     uint32_t length; /*< Bytes length */
     uint32_t offset; /*< Read offset relative to the start offset */
     uint8_t  running_event; /*< Running (previous) event */
@@ -258,6 +258,7 @@ static
 int HandleMessage (demux_t *p_demux, mtrk_t *tr, es_out_t *out)
 {
     stream_t *s = p_demux->s;
+    demux_sys_t *sys = p_demux->p_sys;
     block_t *block;
     uint8_t first, event;
     unsigned datalen;
@@ -330,26 +331,27 @@ int HandleMessage (demux_t *p_demux, mtrk_t *tr, es_out_t *out)
     block->p_buffer[0] = event;
     if (first & 0x80)
     {
-        vlc_stream_Read (s, block->p_buffer + 1, datalen);
+        if (vlc_stream_Read(s, block->p_buffer + 1, datalen) < datalen)
+            goto error;
     }
     else
     {
         if (datalen == 0)
-        {
+        {   /* implicit running status requires non-empty payload */
             msg_Err (p_demux, "malformatted MIDI event");
-            block_Release(block);
-            return -1; /* implicit running status requires non-empty payload */
+            goto error;
         }
 
         block->p_buffer[1] = first;
-        if (datalen > 1)
-            vlc_stream_Read (s, block->p_buffer + 2, datalen - 1);
+        if (datalen > 1
+         && vlc_stream_Read(s, block->p_buffer + 2, datalen - 1) < datalen - 1)
+            goto error;
     }
 
 send:
-    block->i_dts = block->i_pts = date_Get (&p_demux->p_sys->pts);
+    block->i_dts = block->i_pts = date_Get(&sys->pts);
     if (out != NULL)
-        es_out_Send (out, p_demux->p_sys->es, block);
+        es_out_Send(out, sys->es, block);
     else
         block_Release (block);
 
@@ -360,6 +362,10 @@ skip:
 
     tr->offset = vlc_stream_Tell (s) - tr->start;
     return 0;
+
+error:
+    block_Release(block);
+    return -1;
 }
 
 static int SeekSet0 (demux_t *demux)
@@ -447,7 +453,7 @@ static int Demux (demux_t *demux)
         tick->i_dts = tick->i_pts = sys->tick;
 
         es_out_Send (demux->out, sys->es, tick);
-        es_out_Control (demux->out, ES_OUT_SET_PCR, sys->tick);
+        es_out_SetPCR (demux->out, sys->tick);
 
         sys->tick += TICK;
         return 1;
@@ -518,6 +524,13 @@ static int Control (demux_t *demux, int i_query, va_list args)
             break;
         case DEMUX_SET_TIME:
             return Seek (demux, va_arg (args, int64_t));
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( demux->s, 0, -1, 0, 1, i_query, args );
+
         default:
             return VLC_EGENERIC;
     }
@@ -665,8 +678,11 @@ static int Open (vlc_object_t *obj)
             if (memcmp (head, "MTrk", 4) == 0)
                 break;
 
-            msg_Dbg (demux, "skipping unknown SMF chunk");
-            vlc_stream_Read (stream, NULL, GetDWBE (head + 4));
+            uint_fast32_t chunk_len = GetDWBE(head + 4);
+            msg_Dbg(demux, "skipping unknown SMF chunk (%"PRIuFAST32" bytes)",
+                    chunk_len);
+            if (vlc_stream_Seek(stream, vlc_stream_Tell(stream) + chunk_len))
+                goto error;
         }
 
         tr->start = vlc_stream_Tell (stream);

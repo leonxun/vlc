@@ -336,7 +336,9 @@ static bool h264_parse_sequence_parameter_set_rbsp( bs_t *p_bs,
     }
     else
     {
-        p_sps->i_chroma_idc = 1; /* Not present == inferred to 4:2:2 */
+        p_sps->i_chroma_idc = 1; /* Not present == inferred to 4:2:0 */
+        p_sps->i_bit_depth_luma = 8;
+        p_sps->i_bit_depth_chroma = 8;
     }
 
     /* Skip i_log2_max_frame_num */
@@ -494,7 +496,7 @@ static bool h264_parse_sequence_parameter_set_rbsp( bs_t *p_bs,
                     return false;
                 bs_read( p_bs, 4 );
                 bs_read( p_bs, 4 );
-                for( uint32_t i=0; i<count; i++ )
+                for( uint32_t j = 0; j < count; j++ )
                 {
                     if( bs_remain( p_bs ) < 23 )
                         return false;
@@ -548,18 +550,21 @@ static bool h264_parse_picture_parameter_set_rbsp( bs_t *p_bs,
 
     bs_skip( p_bs, 1 ); // entropy coding mode flag
     p_pps->i_pic_order_present_flag = bs_read( p_bs, 1 );
-    unsigned num_slice_groups_minus1 = bs_read_ue( p_bs );
-    if( num_slice_groups_minus1 > 0 )
+
+    unsigned num_slice_groups = bs_read_ue( p_bs ) + 1;
+    if( num_slice_groups > 8 ) /* never has value > 7. Annex A, G & J */
+        return false;
+    if( num_slice_groups > 1 )
     {
         unsigned slice_group_map_type = bs_read_ue( p_bs );
         if( slice_group_map_type == 0 )
         {
-            for( unsigned i=0; i <= num_slice_groups_minus1; i++ )
+            for( unsigned i = 0; i < num_slice_groups; i++ )
                 bs_read_ue( p_bs ); /* run_length_minus1[group] */
         }
         else if( slice_group_map_type == 2 )
         {
-            for( unsigned i=0; i <= num_slice_groups_minus1; i++ )
+            for( unsigned i = 0; i < num_slice_groups; i++ )
             {
                 bs_read_ue( p_bs ); /* top_left[group] */
                 bs_read_ue( p_bs ); /* bottom_right[group] */
@@ -572,16 +577,16 @@ static bool h264_parse_picture_parameter_set_rbsp( bs_t *p_bs,
         }
         else if( slice_group_map_type == 6 )
         {
-            unsigned pic_size_in_maps_units_minus1 = bs_read_ue( p_bs );
+            unsigned pic_size_in_maps_units = bs_read_ue( p_bs ) + 1;
             unsigned sliceGroupSize = 1;
-            while(num_slice_groups_minus1 > 0)
+            while(num_slice_groups > 1)
             {
                 sliceGroupSize++;
-                num_slice_groups_minus1 >>= 1;
+                num_slice_groups = ((num_slice_groups - 1) >> 1) + 1;
             }
-            for( unsigned i=0; i <= pic_size_in_maps_units_minus1; i++ )
+            for( unsigned i = 0; i < pic_size_in_maps_units; i++ )
             {
-                bs_read( p_bs, sliceGroupSize );
+                bs_skip( p_bs, sliceGroupSize );
             }
         }
     }
@@ -739,7 +744,7 @@ bool h264_get_dpb_values( const h264_sequence_parameter_set_t *p_sps,
                     i_max_num_reorder_frames = 0; /* all IDR */
                     break;
                 }
-                // ft
+                /* fallthrough */
             default:
                 i_max_num_reorder_frames = h264_get_max_dpb_frames( p_sps );
                 break;
@@ -787,13 +792,29 @@ bool h264_get_picture_size( const h264_sequence_parameter_set_t *p_sps, unsigned
 bool h264_get_chroma_luma( const h264_sequence_parameter_set_t *p_sps, uint8_t *pi_chroma_format,
                            uint8_t *pi_depth_luma, uint8_t *pi_depth_chroma )
 {
-    if( p_sps->i_bit_depth_luma == 0 )
-        return false;
     *pi_chroma_format = p_sps->i_chroma_idc;
     *pi_depth_luma = p_sps->i_bit_depth_luma;
     *pi_depth_chroma = p_sps->i_bit_depth_chroma;
     return true;
 }
+bool h264_get_colorimetry( const h264_sequence_parameter_set_t *p_sps,
+                           video_color_primaries_t *p_primaries,
+                           video_transfer_func_t *p_transfer,
+                           video_color_space_t *p_colorspace,
+                           bool *p_full_range )
+{
+    if( !p_sps->vui.b_valid )
+        return false;
+    *p_primaries =
+        hxxx_colour_primaries_to_vlc( p_sps->vui.colour.i_colour_primaries );
+    *p_transfer =
+        hxxx_transfer_characteristics_to_vlc( p_sps->vui.colour.i_transfer_characteristics );
+    *p_colorspace =
+        hxxx_matrix_coeffs_to_vlc( p_sps->vui.colour.i_matrix_coefficients );
+    *p_full_range = p_sps->vui.colour.b_full_range;
+    return true;
+}
+
 
 bool h264_get_profile_level(const es_format_t *p_fmt, uint8_t *pi_profile,
                             uint8_t *pi_level, uint8_t *pi_nal_length_size)

@@ -62,9 +62,6 @@ typedef struct vout_display_sys_win32_t
     bool is_first_display;
     bool is_on_top;
 
-    /* screensaver system settings to be restored when vout is closed */
-    UINT i_spi_screensaveactive;
-
     /* Coordinates of src and dest images (used when blitting to display) */
     RECT         rect_src;
     RECT         rect_src_clipped;
@@ -98,7 +95,6 @@ int  CommonUpdatePicture(picture_t *, picture_t **fallback, uint8_t *plane, unsi
 
 void UpdateRects (vout_display_t *,
                   const vout_display_cfg_t *,
-                  const video_format_t *,
                   bool is_forced);
 void AlignRect(RECT *, int align_boundary, int align_size);
 

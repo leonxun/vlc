@@ -62,7 +62,7 @@
 
 #define WIDTH_TEXT N_( "Capture region width" )
 
-#define HEIGHT_TEXT N_( "Capture region heigh" )
+#define HEIGHT_TEXT N_( "Capture region height" )
 
 #define FOLLOW_MOUSE_TEXT N_( "Follow the mouse" )
 #define FOLLOW_MOUSE_LONGTEXT N_( \
@@ -79,7 +79,7 @@
 #ifdef SCREEN_DISPLAY_ID
 #define DISPLAY_ID_TEXT N_( "Display ID" )
 #define DISPLAY_ID_LONGTEXT N_( \
-    "Display ID. If not specified, main display ID is used. " )
+    "Display ID. If not specified, main display ID is used." )
 #define INDEX_TEXT N_( "Screen index" )
 #define INDEX_LONGTEXT N_( \
     "Index of screen (1, 2, 3, ...). Alternative to Display ID." )
@@ -143,6 +143,9 @@ static int Open( vlc_object_t *p_this )
 {
     demux_t     *p_demux = (demux_t*)p_this;
     demux_sys_t *p_sys;
+
+    if (p_demux->out == NULL)
+        return VLC_EGENERIC;
 
     /* Fill p_demux field */
     p_demux->pf_demux = Demux;
@@ -288,7 +291,7 @@ static int Demux( demux_t *p_demux )
 
     p_block->i_dts = p_block->i_pts = p_sys->i_next_date;
 
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_block->i_pts );
+    es_out_SetPCR( p_demux->out, p_block->i_pts );
     es_out_Send( p_demux->out, p_sys->es, p_block );
 
     p_sys->i_next_date += p_sys->i_incr;

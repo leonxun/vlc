@@ -288,7 +288,7 @@ LIBVLC_API void libvlc_media_player_stop ( libvlc_media_player_t *p_mi );
  * \version LibVLC 3.0.0 or later
  */
 LIBVLC_API int libvlc_media_player_set_renderer( libvlc_media_player_t *p_mi,
-                                                 const libvlc_renderer_item_t *p_item );
+                                                 libvlc_renderer_item_t *p_item );
 
 /**
  * Callback prototype to allocate and lock a picture buffer.
@@ -587,19 +587,6 @@ LIBVLC_API void libvlc_media_player_set_android_context( libvlc_media_player_t *
                                                          void *p_awindow_handler );
 
 /**
- * Set the EFL Evas Object.
- *
- * \version LibVLC 3.0.0 and later.
- *
- * \param p_mi the media player
- * \param p_evas_object a valid EFL Evas Object (Evas_Object)
- * \return -1 if an error was detected, 0 otherwise.
- */
-LIBVLC_API int libvlc_media_player_set_evas_object( libvlc_media_player_t *p_mi,
-                                                    void *p_evas_object );
-
-
-/**
  * Callback prototype for audio playback.
  *
  * The LibVLC media player decodes and post-processes the audio signal
@@ -614,8 +601,8 @@ LIBVLC_API int libvlc_media_player_set_evas_object( libvlc_media_player_t *p_mi,
  * or libvlc_audio_set_format_callbacks() as is the channels layout.
  *
  * Note that the number of samples is per channel. For instance, if the audio
- * track sampling rate is 48000 Hz, then 1200 samples represent 25 milliseconds
- * of audio signal - regardless of the number of audio channels. 
+ * track sampling rate is 48000 Hz, then 1200 samples represent 25 milliseconds
+ * of audio signal - regardless of the number of audio channels.
  *
  * \param data data pointer as passed to libvlc_audio_set_callbacks() [IN]
  * \param samples pointer to a table of audio samples to play back [IN]
@@ -811,7 +798,7 @@ LIBVLC_API void libvlc_media_player_set_time( libvlc_media_player_t *p_mi, libvl
 LIBVLC_API float libvlc_media_player_get_position( libvlc_media_player_t *p_mi );
 
 /**
- * Set movie position as percentage between 0.0 and 1.0. 
+ * Set movie position as percentage between 0.0 and 1.0.
  * This has no effect if playback is not enabled.
  * This might not work depending on the underlying input format and protocol.
  *
@@ -1178,19 +1165,6 @@ LIBVLC_API char *libvlc_video_get_aspect_ratio( libvlc_media_player_t *p_mi );
 LIBVLC_API void libvlc_video_set_aspect_ratio( libvlc_media_player_t *p_mi, const char *psz_aspect );
 
 /**
- * Viewpoint for video outputs
- *
- * \warning allocate using libvlc_video_new_viewpoint()
- */
-typedef struct libvlc_video_viewpoint_t
-{
-    float f_yaw;           /**< view point yaw in degrees  ]-180;180] */
-    float f_pitch;         /**< view point pitch in degrees  ]-90;90] */
-    float f_roll;          /**< view point roll in degrees ]-180;180] */
-    float f_field_of_view; /**< field of view in degrees ]0;180[ (default 80.)*/
-} libvlc_video_viewpoint_t;
-
-/**
  * Create a video viewpoint structure.
  *
  * \version LibVLC 3.0.0 and later
@@ -1418,7 +1392,7 @@ int libvlc_video_set_track( libvlc_media_player_t *p_mi, int i_track );
  *
  * \param p_mi media player instance
  * \param num number of video output (typically 0 for the first/only one)
- * \param psz_filepath the path where to save the screenshot to
+ * \param psz_filepath the path of a file or a folder to save the screenshot into
  * \param i_width the snapshot's width
  * \param i_height the snapshot's height
  * \return 0 on success, -1 if the video was not found
@@ -2065,7 +2039,7 @@ typedef enum libvlc_media_player_role {
     libvlc_role_Video, /**< Video playback */
     libvlc_role_Communication, /**< Speech, real-time communication */
     libvlc_role_Game, /**< Video game */
-    liblvc_role_Notification, /**< User interaction feedback */
+    libvlc_role_Notification, /**< User interaction feedback */
     libvlc_role_Animation, /**< Embedded animation (e.g. in web page) */
     libvlc_role_Production, /**< Audio editting/production */
     libvlc_role_Accessibility, /**< Accessibility */

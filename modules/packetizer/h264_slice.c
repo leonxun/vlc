@@ -160,7 +160,7 @@ bool h264_decode_slice( const uint8_t *p_buffer, size_t i_buffer,
         const unsigned i_num_layers = ( i_slice_type % 5 == 1 ) ? 2 : 1;
         for( unsigned j=0; j < i_num_layers; j++ )
         {
-            for( unsigned i=0; i<=num_ref_idx_l01_active_minus1[j]; i++ )
+            for( unsigned k=0; k<=num_ref_idx_l01_active_minus1[j]; k++ )
             {
                 if( bs_read1( &s ) ) /* luma_weight_l{0,1}_flag */
                 {
@@ -215,7 +215,7 @@ bool h264_decode_slice( const uint8_t *p_buffer, size_t i_buffer,
 
 
 void h264_compute_poc( const h264_sequence_parameter_set_t *p_sps,
-                       const h264_slice_t *p_slice, poc_context_t *p_ctx,
+                       const h264_slice_t *p_slice, h264_poc_context_t *p_ctx,
                        int *p_PictureOrderCount, int *p_tFOC, int *p_bFOC )
 {
     *p_tFOC = *p_bFOC = 0;
@@ -270,7 +270,7 @@ void h264_compute_poc( const h264_sequence_parameter_set_t *p_sps,
 
         if( p_slice->i_nal_type == H264_NAL_SLICE_IDR )
             frameNumOffset = 0;
-        else if( p_ctx->prevFrameNum > (unsigned) p_slice->i_frame_num )
+        else if( p_ctx->prevFrameNum > p_slice->i_frame_num )
             frameNumOffset = p_ctx->prevFrameNumOffset + maxFrameNum;
         else
             frameNumOffset = p_ctx->prevFrameNumOffset;

@@ -13,13 +13,18 @@ DXGITYPE_COMMIT_ID := f4aba520d014ecfe3563e33860de001caf2804e2
 D3D11_IDL_URL := http://sourceforge.net/p/mingw-w64/mingw-w64/ci/$(D3D11_COMMIT_ID)/tree/mingw-w64-headers/direct-x/include/d3d11.idl?format=raw
 DXGI12_IDL_URL := http://sourceforge.net/p/mingw-w64/mingw-w64/ci/$(DXGI12_COMMIT_ID)/tree/mingw-w64-headers/direct-x/include/dxgi1_2.idl?format=raw
 DXGITYPE_H_URL := http://sourceforge.net/p/mingw-w64/mingw-w64/ci/$(DXGITYPE_COMMIT_ID)/tree/mingw-w64-headers/direct-x/include/dxgitype.h?format=raw
+DXGIFORMAT_H_URL := http://sourceforge.net/p/mingw-w64/mingw-w64/ci/$(DXGITYPE_COMMIT_ID)/tree/mingw-w64-headers/direct-x/include/dxgiformat.h?format=raw
+DXGI_IDL_URL := http://sourceforge.net/p/mingw-w64/mingw-w64/ci/$(DXGITYPE_COMMIT_ID)/tree/mingw-w64-headers/direct-x/include/dxgi.idl?format=raw
 DST_D3D11_H = $(PREFIX)/include/d3d11.h
 DST_DXGIDEBUG_H = $(PREFIX)/include/dxgidebug.h
 DST_DXGITYPE_H = $(PREFIX)/include/dxgitype.h
+DST_DXGIFORMAT_H = $(PREFIX)/include/dxgiformat.h
+DST_DXGI_IDL = $(PREFIX)/include/dxgi.idl
 DST_DXGI12_H = $(PREFIX)/include/dxgi1_2.h
 DST_DXGI13_H = $(PREFIX)/include/dxgi1_3.h
 DST_DXGI14_H = $(PREFIX)/include/dxgi1_4.h
 DST_DXGI15_H = $(PREFIX)/include/dxgi1_5.h
+DST_DXGI16_H = $(PREFIX)/include/dxgi1_6.h
 
 
 ifdef HAVE_WIN32
@@ -27,18 +32,24 @@ PKGS += d3d11
 endif
 
 $(TARBALLS)/d3d11.idl:
-	$(call download,$(D3D11_IDL_URL))
+	$(call download_pkg,$(D3D11_IDL_URL),d3d11)
 
 $(TARBALLS)/dxgidebug.idl:
 	(cd $(TARBALLS) && patch -fp1) < $(SRC)/d3d11/dxgidebug.patch
 
 $(TARBALLS)/dxgi1_2.idl:
-	$(call download,$(DXGI12_IDL_URL))
+	$(call download_pkg,$(DXGI12_IDL_URL),d3d11)
 
 $(TARBALLS)/dxgitype.h:
-	$(call download,$(DXGITYPE_H_URL))
+	$(call download_pkg,$(DXGITYPE_H_URL),d3d11)
 
-.sum-d3d11: $(TARBALLS)/d3d11.idl $(TARBALLS)/dxgidebug.idl $(TARBALLS)/dxgi1_2.idl $(TARBALLS)/dxgitype.h
+$(TARBALLS)/dxgiformat.h:
+	$(call download_pkg,$(DXGIFORMAT_H_URL),d3d11)
+
+$(TARBALLS)/dxgi.idl:
+	$(call download_pkg,$(DXGI_IDL_URL),d3d11)
+
+.sum-d3d11: $(TARBALLS)/d3d11.idl $(TARBALLS)/dxgidebug.idl $(TARBALLS)/dxgi1_2.idl $(TARBALLS)/dxgitype.h $(TARBALLS)/dxgiformat.h $(TARBALLS)/dxgi.idl
 
 d3d11: .sum-d3d11
 	mkdir -p $@
@@ -50,33 +61,45 @@ dxgi12: .sum-d3d11
 
 $(DST_D3D11_H): d3d11
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -I$(IDL_INC_PATH) -h -o $@ $</d3d11.idl
+	$(WIDL) -DBOOL=WINBOOL -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $</d3d11.idl
 
 $(DST_DXGIDEBUG_H): $(TARBALLS)/dxgidebug.idl
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -I$(IDL_INC_PATH) -h -o $@ $<
+	$(WIDL) -DBOOL=WINBOOL -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $<
 
 $(DST_DXGITYPE_H): $(TARBALLS)/dxgitype.h
 	mkdir -p -- "$(PREFIX)/include/"
 	cp $(TARBALLS)/dxgitype.h $@
 
+$(DST_DXGIFORMAT_H): $(TARBALLS)/dxgiformat.h
+	mkdir -p -- "$(PREFIX)/include/"
+	cp $(TARBALLS)/dxgiformat.h $@
+
+$(DST_DXGI_IDL): $(TARBALLS)/dxgi.idl
+	mkdir -p -- "$(PREFIX)/include/"
+	cp $(TARBALLS)/dxgi.idl $@
+
 $(DST_DXGI12_H): dxgi12
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -I$(IDL_INC_PATH) -h -o $@ $</dxgi1_2.idl
+	$(WIDL) -DBOOL=WINBOOL -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $</dxgi1_2.idl
 
 $(DST_DXGI13_H): $(SRC)/d3d11/dxgi1_3.idl $(DST_DXGI12_H)
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(IDL_INC_PATH) -h -o $@ $<
+	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $<
 
 $(DST_DXGI14_H): $(SRC)/d3d11/dxgi1_4.idl $(DST_DXGI13_H)
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(IDL_INC_PATH) -h -o $@ $<
+	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $<
 
 $(DST_DXGI15_H): $(SRC)/d3d11/dxgi1_5.idl $(DST_DXGI14_H)
 	mkdir -p -- "$(PREFIX)/include/"
-	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(IDL_INC_PATH) -h -o $@ $<
+	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $<
 
-.dxgitype: $(DST_DXGITYPE_H)
+$(DST_DXGI16_H): $(SRC)/d3d11/dxgi1_6.idl $(DST_DXGI15_H)
+	mkdir -p -- "$(PREFIX)/include/"
+	$(WIDL) -DBOOL=WINBOOL -Idxgi12 -I$(PREFIX)/include -I$(IDL_INC_PATH) -h -o $@ $<
+
+.dxgitype: $(DST_DXGITYPE_H) $(DST_DXGIFORMAT_H) $(DST_DXGI_IDL)
 	touch $@
 
 .dxgi12: .dxgitype $(DST_DXGI12_H)
@@ -91,5 +114,8 @@ $(DST_DXGI15_H): $(SRC)/d3d11/dxgi1_5.idl $(DST_DXGI14_H)
 .dxgi15: .dxgi14 $(DST_DXGI15_H)
 	touch $@
 
-.d3d11: $(DST_D3D11_H) $(DST_DXGIDEBUG_H) .dxgi15
+.dxgi16: .dxgi15 $(DST_DXGI16_H)
+	touch $@
+
+.d3d11: $(DST_D3D11_H) $(DST_DXGIDEBUG_H) .dxgi16
 	touch $@

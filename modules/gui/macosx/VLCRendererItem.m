@@ -55,6 +55,14 @@
     return [NSString stringWithUTF8String:name];
 }
 
+- (NSString*)identifier
+{
+    const char *sout = vlc_renderer_item_sout(_rendererItem);
+    if (!sout)
+        return nil;
+    return [NSString stringWithUTF8String:sout];
+}
+
 - (NSString*)iconURI
 {
     const char *uri = vlc_renderer_item_icon_uri(_rendererItem);
@@ -68,29 +76,18 @@
     return vlc_renderer_item_flags(_rendererItem);
 }
 
-- (bool)isSoutEqualTo:(const char*)sout asOutput:(bool)output
+- (void)setRendererForPlaylist:(playlist_t*)playlist
 {
-    NSString *temp_sout;
-    NSString *prefix;
-    NSString *self_sout;
-
-    prefix = (output) ? @"#" : @"";
-    self_sout = [prefix stringByAppendingString:toNSStr(vlc_renderer_item_sout(_rendererItem))];
-    temp_sout = toNSStr(sout);
-
-    return [temp_sout isEqualToString:self_sout];
+    playlist_SetRenderer(playlist, _rendererItem);
 }
 
-- (void)setSoutForPlaylist:(playlist_t*)playlist
+- (BOOL)isEqual:(id)object
 {
-    NSString *sout;
-    const char *item_sout = vlc_renderer_item_sout(_rendererItem);
-
-    if (!playlist || !item_sout)
-        return;
-
-    sout = [[NSString alloc] initWithFormat:@"#%s", item_sout];
-    var_SetString(playlist , "sout", sout.UTF8String);
+    if (![object isKindOfClass:[VLCRendererItem class]]) {
+        return NO;
+    }
+    VLCRendererItem *other = object;
+    return (other.rendererItem == self.rendererItem);
 }
 
 @end

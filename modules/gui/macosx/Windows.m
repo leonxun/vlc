@@ -182,7 +182,7 @@
 
     BOOL b_inFullscreen = [self fullscreen] || ([self respondsToSelector:@selector(inFullscreenTransition)] && [(VLCVideoWindowCommon *)self inFullscreenTransition]);
 
-    if((OSX_MAVERICKS) && b_inFullscreen && constrainedRect.size.width == screenRect.size.width
+    if((OSX_MAVERICKS_AND_HIGHER && !OSX_YOSEMITE_AND_HIGHER) && b_inFullscreen && constrainedRect.size.width == screenRect.size.width
           && constrainedRect.size.height != screenRect.size.height
           && fabs(screenRect.size.height - constrainedRect.size.height) <= 25.) {
 
@@ -215,8 +215,6 @@
 
     BOOL b_video_view_was_hidden;
 
-    NSTimer *t_hide_mouse_timer;
-
     NSRect frameBeforeLionFullscreen;
 }
 
@@ -233,10 +231,10 @@
 - (id)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)styleMask
                   backing:(NSBackingStoreType)backingType defer:(BOOL)flag
 {
-    _darkInterface = config_GetInt(getIntf(), "macosx-interfacestyle");
+    _darkInterface = config_GetInt("macosx-interfacestyle");
 
     if (_darkInterface) {
-        styleMask = NSBorderlessWindowMask | NSResizableWindowMask;
+        styleMask = NSBorderlessWindowMask | NSResizableWindowMask | NSMiniaturizableWindowMask;
     }
 
     self = [super initWithContentRect:contentRect styleMask:styleMask
@@ -258,7 +256,7 @@
 
     if (b_nativeFullscreenMode) {
         [self setCollectionBehavior: NSWindowCollectionBehaviorFullScreenPrimary];
-    } else if (OSX_EL_CAPITAN || OSX_SIERRA) {
+    } else if (OSX_EL_CAPITAN_AND_HIGHER) {
         // Native fullscreen seems to be default on El Capitan, this disables it explicitely
         [self setCollectionBehavior: NSWindowCollectionBehaviorFullScreenAuxiliary];
     }
@@ -542,46 +540,6 @@
 }
 
 #pragma mark -
-#pragma mark Mouse cursor handling
-
-//  NSTimer selectors require this function signature as per Apple's docs
-- (void)hideMouseCursor:(NSTimer *)timer
-{
-    [NSCursor setHiddenUntilMouseMoves: YES];
-}
-
-- (void)recreateHideMouseTimer
-{
-    if (t_hide_mouse_timer != nil) {
-        [t_hide_mouse_timer invalidate];
-    }
-
-    t_hide_mouse_timer = [NSTimer scheduledTimerWithTimeInterval:2
-                                                          target:self
-                                                        selector:@selector(hideMouseCursor:)
-                                                        userInfo:nil
-                                                         repeats:NO];
-}
-
-//  Called automatically if window's acceptsMouseMovedEvents property is true
-- (void)mouseMoved:(NSEvent *)theEvent
-{
-    if (self.fullscreen)
-        [self recreateHideMouseTimer];
-    if (self.hasActiveVideo && [self isKeyWindow]) {
-        if (NSPointInRect([theEvent locationInWindow],
-                          [[self videoView] convertRect:[[self videoView] bounds]
-                                                 toView:nil])) {
-            [self recreateHideMouseTimer];
-        } else {
-            [t_hide_mouse_timer invalidate];
-        }
-    }
-
-    [super mouseMoved: theEvent];
-}
-
-#pragma mark -
 #pragma mark Key events
 
 - (void)flagsChanged:(NSEvent *)theEvent
@@ -594,6 +552,18 @@
 
 #pragma mark -
 #pragma mark Lion native fullscreen handling
+
+- (void)hideControlsBar
+{
+    [[self.controlsBar bottomBarView] setHidden: YES];
+    self.videoViewBottomConstraint.priority = 1;
+}
+
+- (void)showControlsBar
+{
+    [[self.controlsBar bottomBarView] setHidden: NO];
+    self.videoViewBottomConstraint.priority = 999;
+}
 
 - (void)becomeKeyWindow
 {
@@ -661,8 +631,8 @@
 
     NSInteger i_currLevel = [self level];
     // self.fullscreen and _inFullscreenTransition must not be true yet
-    [[[VLCMain sharedInstance] voutController] updateWindowLevelForHelperWindows: NSMainMenuWindowLevel + 1];
-    [self setLevel:NSMainMenuWindowLevel + 1];
+    [[[VLCMain sharedInstance] voutController] updateWindowLevelForHelperWindows: NSNormalWindowLevel];
+    [self setLevel:NSNormalWindowLevel];
     i_originalLevel = i_currLevel;
 
     _inFullscreenTransition = YES;
@@ -679,9 +649,6 @@
         }
     }
 
-    if ([self hasActiveVideo])
-        [[[VLCMain sharedInstance] mainWindow] recreateHideMouseTimer];
-
     if (_darkInterface) {
         [self.titlebarView setHidden:YES];
         self.videoViewTopConstraint.priority = 1;
@@ -694,12 +661,8 @@
         [self setFrame: winrect display:NO animate:NO];
     }
 
-    // TODO remove
-    [_videoView setFrame: [[self contentView] frame]];
-
     if (![_videoView isHidden]) {
-        [[self.controlsBar bottomBarView] setHidden: YES];
-        self.videoViewBottomConstraint.priority = 1;
+        [self hideControlsBar];
     }
 
     [self setMovableByWindowBackground: NO];
@@ -757,15 +720,8 @@
         [self setFrame: winrect display:NO animate:NO];
     }
 
-    // TODO remove
-    NSRect videoViewFrame = [_videoView frame];
-    videoViewFrame.origin.y += [self.controlsBar height];
-    videoViewFrame.size.height -= [self.controlsBar height];
-    [_videoView setFrame: videoViewFrame];
-
     if (![_videoView isHidden]) {
-        [[self.controlsBar bottomBarView] setHidden: NO];
-        self.videoViewBottomConstraint.priority = 999;
+        [self showControlsBar];
     }
 
     [self setMovableByWindowBackground: YES];
@@ -807,16 +763,14 @@
         [self.controlsBar setFullscreenState:YES];
     [[[[VLCMain sharedInstance] mainWindow] controlsBar] setFullscreenState:YES];
 
-    [[[VLCMain sharedInstance] mainWindow] recreateHideMouseTimer];
-
     if (blackout_other_displays)
         [screen blackoutOtherScreens];
 
     /* Make sure we don't see the window flashes in float-on-top mode */
     NSInteger i_currLevel = [self level];
     // self.fullscreen must not be true yet
-    [[[VLCMain sharedInstance] voutController] updateWindowLevelForHelperWindows: NSMainMenuWindowLevel + 1];
-    [self setLevel:NSMainMenuWindowLevel + 1];
+    [[[VLCMain sharedInstance] voutController] updateWindowLevelForHelperWindows: NSNormalWindowLevel];
+    [self setLevel:NSNormalWindowLevel];
     i_originalLevel = i_currLevel; // would be overwritten by previous call
 
     /* Only create the o_fullscreen_window if we are not in the middle of the zooming animation */
@@ -832,7 +786,6 @@
         [o_fullscreen_window setCanBecomeMainWindow: YES];
         [o_fullscreen_window setHasActiveVideo: YES];
         [o_fullscreen_window setFullscreen: YES];
-        [o_fullscreen_window setLevel:NSMainMenuWindowLevel + 1];
 
         /* Make sure video view gets visible in case the playlist was visible before */
         b_video_view_was_hidden = [_videoView isHidden];
@@ -862,6 +815,8 @@
             [o_fullscreen_window setFrame:screen_rect display:YES animate:NO];
 
             [o_fullscreen_window orderFront:self animate:YES];
+
+            [o_fullscreen_window setLevel:NSNormalWindowLevel];
 
             if (blackout_other_displays) {
                 CGDisplayFade(token, 0.3, kCGDisplayBlendSolidColor, kCGDisplayBlendNormal, 0, 0, 0, NO);
@@ -1063,6 +1018,8 @@
     NSDisableScreenUpdates();
     [_videoView removeFromSuperviewWithoutNeedingDisplay];
     [[o_temp_view superview] replaceSubview:o_temp_view with:_videoView];
+    // TODO Replace tmpView by an existing view (e.g. middle view)
+    // TODO Use constraints for fullscreen window, reinstate constraints once the video view is added to the main window again
     [_videoView setFrame:[o_temp_view frame]];
     if ([[_videoView subviews] count] > 0)
         [self makeFirstResponder: [[_videoView subviews] firstObject]];
@@ -1079,7 +1036,7 @@
     [[[VLCMain sharedInstance] voutController] updateWindowLevelForHelperWindows: i_originalLevel];
     [self setLevel:i_originalLevel];
 
-    [self setAlphaValue: config_GetFloat(getIntf(), "macosx-opaqueness")];
+    [self setAlphaValue: config_GetFloat("macosx-opaqueness")];
 }
 
 - (void)animationDidEnd:(NSAnimation*)animation

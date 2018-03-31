@@ -51,7 +51,7 @@ vlc_module_begin ()
     set_subcategory (SUBCAT_VIDEO_VOUT)
     set_capability ("vout display", 100)
     set_callbacks (Open, Close)
-    add_shortcut ("xcb-x11", "x11", "xid")
+    add_shortcut ("xcb-x11", "x11")
 
     add_obsolete_bool ("x11-shm") /* obsoleted since 2.0.0 */
 vlc_module_end ()
@@ -304,7 +304,6 @@ found_format:;
     vd->prepare = NULL;
     vd->display = Display;
     vd->control = Control;
-    vd->manage = NULL;
 
     return VLC_SUCCESS;
 
@@ -504,9 +503,6 @@ static int Control (vout_display_t *vd, int query, va_list ap)
         vd->fmt.i_y_offset = src.i_y_offset * place.height / src.i_visible_height;
         return VLC_SUCCESS;
     }
-
-    case VOUT_DISPLAY_HIDE_MOUSE:
-        return VLC_EGENERIC;
 
     default:
         msg_Err (vd, "Unknown request in XCB vout display");

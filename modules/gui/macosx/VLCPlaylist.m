@@ -48,7 +48,7 @@
 #import "VLCResumeDialogController.h"
 #import "VLCOpenWindowController.h"
 
-#include <vlc_keys.h>
+#include <vlc_actions.h>
 #import <vlc_interface.h>
 #include <vlc_url.h>
 
@@ -134,9 +134,7 @@
     [columnArray addObject: [NSArray arrayWithObjects:DURATION_COLUMN, [NSNumber numberWithFloat:95.], nil]];
 
     NSDictionary *appDefaults = [NSDictionary dictionaryWithObjectsAndKeys:
-                                 [NSArray arrayWithArray:columnArray], @"PlaylistColumnSelection",
-                                 [NSArray array], @"recentlyPlayedMediaList",
-                                 [NSDictionary dictionary], @"recentlyPlayedMedia", nil];
+                                 [NSArray arrayWithArray:columnArray], @"PlaylistColumnSelection", nil];
 
     [defaults registerDefaults:appDefaults];
 }
@@ -229,7 +227,8 @@
 {
     [_playPlaylistMenuItem setTitle: _NS("Play")];
     [_deletePlaylistMenuItem setTitle: _NS("Delete")];
-    [_recursiveExpandPlaylistMenuItem setTitle: _NS("Expand Node")];
+    [_recursiveExpandPlaylistMenuItem setTitle: _NS("Expand All")];
+    [_recursiveCollapsePlaylistMenuItem setTitle: _NS("Collapse All")];
     [_selectAllPlaylistMenuItem setTitle: _NS("Select All")];
     [_infoPlaylistMenuItem setTitle: _NS("Media Information...")];
     [_revealInFinderPlaylistMenuItem setTitle: _NS("Reveal in Finder")];
@@ -258,25 +257,31 @@
     if (!item)
         return;
 
-    // select item
+    // Search for item row for selection
     NSInteger itemIndex = [_outlineView rowForItem:item];
     if (itemIndex < 0) {
-        // expand if needed
-        while (item != nil) {
-            VLCPLItem *parent = [item parent];
-
-            if (![_outlineView isExpandable: parent])
-                break;
-            if (![_outlineView isItemExpanded: parent])
-                [_outlineView expandItem: parent];
-            item = parent;
+        // Expand if needed. This must be done from root to child
+        // item in order to work
+        NSMutableArray *itemsToExpand = [NSMutableArray array];
+        VLCPLItem *tmpItem = [item parent];
+        while (tmpItem != nil) {
+            [itemsToExpand addObject:tmpItem];
+            tmpItem = [tmpItem parent];
         }
 
-        // search for row again
-        itemIndex = [_outlineView rowForItem:item];
-        if (itemIndex < 0) {
-            return;
+        for(int i = itemsToExpand.count - 1; i >= 0; i--) {
+            VLCPLItem *currentItem = [itemsToExpand objectAtIndex:i];
+            [_outlineView expandItem: currentItem];
         }
+    }
+
+    // Update highlight for currently playing item
+    [_outlineView reloadData];
+
+    // Search for row again
+    itemIndex = [_outlineView rowForItem:item];
+    if (itemIndex < 0) {
+        return;
     }
 
     [_outlineView selectRowIndexes: [NSIndexSet indexSetWithIndex: itemIndex] byExtendingSelection: NO];
@@ -444,8 +449,12 @@
     } else if ([item action] == @selector(deleteItem:)) {
         return [_outlineView numberOfSelectedRows] > 0 && _model.editAllowed;
     } else if ([item action] == @selector(selectAll:)) {
-        return [_outlineView numberOfRows] >= 0;
+        return [_outlineView numberOfRows] > 0;
     } else if ([item action] == @selector(playItem:)) {
+        return [_outlineView numberOfSelectedRows] > 0;
+    } else if ([item action] == @selector(recursiveExpandOrCollapseNode:)) {
+        return [_outlineView numberOfSelectedRows] > 0;
+    } else if ([item action] == @selector(showInfoPanel:)) {
         return [_outlineView numberOfSelectedRows] > 0;
     }
 
@@ -595,15 +604,12 @@
 {
     input_thread_t *p_input = pl_CurrentInput(getIntf());
     if (isSubtitle && array.count == 1 && p_input) {
-        char *path = vlc_uri2path([[[array firstObject] objectForKey:@"ITEM_URL"] UTF8String]);
-
-        if (path) {
-            int i_result = input_AddSubtitleOSD(p_input, path, true, true);
-            free(path);
-            if (i_result == VLC_SUCCESS) {
-                vlc_object_release(p_input);
-                return;
-            }
+        int i_result = input_AddSlave(p_input, SLAVE_TYPE_SPU,
+                    [[[array firstObject] objectForKey:@"ITEM_URL"] UTF8String],
+                    true, true, true);
+        if (i_result == VLC_SUCCESS) {
+            vlc_object_release(p_input);
+            return;
         }
     }
 
@@ -652,8 +658,10 @@
     PL_UNLOCK;
 }
 
-- (IBAction)recursiveExpandNode:(id)sender
+- (IBAction)recursiveExpandOrCollapseNode:(id)sender
 {
+    bool expand = (sender == _recursiveExpandPlaylistMenuItem);
+
     NSIndexSet * selectedRows = [_outlineView selectedRowIndexes];
     NSUInteger count = [selectedRows count];
     NSUInteger indexes[count];
@@ -668,7 +676,9 @@
          expand an already expanded node, even if children nodes are collapsed. */
         if ([_outlineView isExpandable:item]) {
             [_outlineView collapseItem: item collapseChildren: YES];
-            [_outlineView expandItem: item expandChildren: YES];
+
+            if (expand)
+                [_outlineView expandItem: item expandChildren: YES];
         }
 
         selectedRows = [_outlineView selectedRowIndexes];
@@ -681,24 +691,13 @@
     if (!b_playlistmenu_nib_loaded)
         b_playlistmenu_nib_loaded = [NSBundle loadNibNamed:@"PlaylistMenu" owner:self];
 
-    NSPoint pt;
-    bool b_rows;
-    bool b_item_sel;
-
-    pt = [_outlineView convertPoint: [o_event locationInWindow] fromView: nil];
+    NSPoint pt = [_outlineView convertPoint: [o_event locationInWindow] fromView: nil];
     int row = [_outlineView rowAtPoint:pt];
     if (row != -1 && ![[_outlineView selectedRowIndexes] containsIndex: row])
         [_outlineView selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
 
-    b_item_sel = (row != -1 && [_outlineView selectedRow] != -1);
-    b_rows = [_outlineView numberOfRows] != 0;
-
-    playlist_t *p_playlist = pl_Get(getIntf());
-    bool b_del_allowed = [[self model] editAllowed];
-
-    // TODO move other items to menu validation protocol
-    [_infoPlaylistMenuItem setEnabled: b_item_sel];
-    [_recursiveExpandPlaylistMenuItem setEnabled: b_item_sel];
+    // TODO Reenable once per-item info panel is supported again
+    _infoPlaylistMenuItem.hidden = YES;
 
     return _playlistMenu;
 }
@@ -722,9 +721,6 @@
         type = ORDER_NORMAL;
 
     [[self model] sortForColumn:identifier withMode:type];
-
-    // TODO rework, why do we need a full call here?
-//    [self playlistUpdated];
 
     /* Clear indications of any existing column sorting */
     NSUInteger count = [[_outlineView tableColumns] count];
@@ -767,12 +763,6 @@
     }
     PL_UNLOCK;
 
-    /*
-     TODO: repaint all items bold:
-     [self isItem: [o_playing_item pointerValue] inNode: [item pointerValue] checkItemExistence:YES locked:NO]
-     || [o_playing_item isEqual: item]
-     */
-
     if (b_is_playing)
         [cell setFont: [[NSFontManager sharedFontManager] convertFont:fontToUse toHaveTrait:NSBoldFontMask]];
     else
@@ -783,134 +773,6 @@
 - (NSArray *)draggedItems
 {
     return [[self model] draggedItems];
-}
-
-- (BOOL)isValidResumeItem:(input_item_t *)p_item
-{
-    char *psz_url = input_item_GetURI(p_item);
-    NSString *urlString = toNSStr(psz_url);
-    free(psz_url);
-
-    if ([urlString isEqualToString:@""])
-        return NO;
-
-    NSURL *url = [NSURL URLWithString:urlString];
-
-    if (![url isFileURL])
-        return NO;
-
-    BOOL isDir = false;
-    if (![[NSFileManager defaultManager] fileExistsAtPath:[url path] isDirectory:&isDir])
-        return NO;
-
-    if (isDir)
-        return NO;
-
-    return YES;
-}
-
-- (void)continuePlaybackWhereYouLeftOff:(input_thread_t *)p_input_thread
-{
-    NSDictionary *recentlyPlayedFiles = [[NSUserDefaults standardUserDefaults] objectForKey:@"recentlyPlayedMedia"];
-    if (!recentlyPlayedFiles)
-        return;
-
-    input_item_t *p_item = input_GetItem(p_input_thread);
-    if (!p_item)
-        return;
-
-    /* allow the user to over-write the start/stop/run-time */
-    if (var_GetFloat(p_input_thread, "run-time") > 0 ||
-        var_GetFloat(p_input_thread, "start-time") > 0 ||
-        var_GetFloat(p_input_thread, "stop-time") != 0) {
-        return;
-    }
-
-    /* check for file existance before resuming */
-    if (![self isValidResumeItem:p_item])
-        return;
-
-    char *psz_url = vlc_uri_decode(input_item_GetURI(p_item));
-    if (!psz_url)
-        return;
-    NSString *url = toNSStr(psz_url);
-    free(psz_url);
-
-    NSNumber *lastPosition = [recentlyPlayedFiles objectForKey:url];
-    if (!lastPosition || lastPosition.intValue <= 0)
-        return;
-
-    int settingValue = config_GetInt(getIntf(), "macosx-continue-playback");
-    if (settingValue == 2) // never resume
-        return;
-
-    CompletionBlock completionBlock = ^(enum ResumeResult result) {
-
-        if (result == RESUME_RESTART)
-            return;
-
-        mtime_t lastPos = (mtime_t)lastPosition.intValue * 1000000;
-        msg_Dbg(getIntf(), "continuing playback at %lld", lastPos);
-        var_SetInteger(p_input_thread, "time", lastPos);
-    };
-
-    if (settingValue == 1) { // always
-        completionBlock(RESUME_NOW);
-        return;
-    }
-
-    [[[VLCMain sharedInstance] resumeDialog] showWindowWithItem:p_item
-                                               withLastPosition:lastPosition.intValue
-                                                completionBlock:completionBlock];
-
-}
-
-- (void)storePlaybackPositionForItem:(input_thread_t *)p_input_thread
-{
-    if (!var_InheritBool(getIntf(), "macosx-recentitems"))
-        return;
-
-    input_item_t *p_item = input_GetItem(p_input_thread);
-    if (!p_item)
-        return;
-
-    if (![self isValidResumeItem:p_item])
-        return;
-
-    char *psz_url = vlc_uri_decode(input_item_GetURI(p_item));
-    if (!psz_url)
-        return;
-    NSString *url = toNSStr(psz_url);
-    free(psz_url);
-
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSMutableDictionary *mutDict = [[NSMutableDictionary alloc] initWithDictionary:[defaults objectForKey:@"recentlyPlayedMedia"]];
-
-    float relativePos = var_GetFloat(p_input_thread, "position");
-    mtime_t pos = var_GetInteger(p_input_thread, "time") / CLOCK_FREQ;
-    mtime_t dur = input_item_GetDuration(p_item) / 1000000;
-
-    NSMutableArray *mediaList = [[defaults objectForKey:@"recentlyPlayedMediaList"] mutableCopy];
-
-    if (relativePos > .05 && relativePos < .95 && dur > 180) {
-        [mutDict setObject:[NSNumber numberWithInt:pos] forKey:url];
-
-        [mediaList removeObject:url];
-        [mediaList addObject:url];
-        NSUInteger mediaListCount = mediaList.count;
-        if (mediaListCount > 30) {
-            for (NSUInteger x = 0; x < mediaListCount - 30; x++) {
-                [mutDict removeObjectForKey:[mediaList firstObject]];
-                [mediaList removeObjectAtIndex:0];
-            }
-        }
-    } else {
-        [mutDict removeObjectForKey:url];
-        [mediaList removeObject:url];
-    }
-    [defaults setObject:mutDict forKey:@"recentlyPlayedMedia"];
-    [defaults setObject:mediaList forKey:@"recentlyPlayedMediaList"];
-    [defaults synchronize];
 }
 
 @end

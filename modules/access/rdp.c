@@ -279,6 +279,7 @@ static bool authenticateHandler( freerdp *p_instance, char** ppsz_username,
  *****************************************************************************/
 static int Control( demux_t *p_demux, int i_query, va_list args )
 {
+    demux_sys_t *p_sys = p_demux->p_sys;
     bool *pb;
     int64_t *pi64;
     double *p_dbl;
@@ -308,7 +309,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_TIME:
             pi64 = va_arg( args, int64_t * );
-            *pi64 = mdate() - p_demux->p_sys->i_starttime;
+            *pi64 = mdate() - p_sys->i_starttime;
             return VLC_SUCCESS;
 
         case DEMUX_GET_LENGTH:
@@ -318,7 +319,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_FPS:
             p_dbl = va_arg( args, double * );
-            *p_dbl = p_demux->p_sys->f_fps;
+            *p_dbl = p_sys->f_fps;
             return VLC_SUCCESS;
 
         case DEMUX_GET_META:
@@ -408,7 +409,7 @@ static void *DemuxThread( void *p_data )
             if (likely( p_block && p_sys->p_block ))
             {
                 p_sys->p_block->i_dts = p_sys->p_block->i_pts = mdate() - p_sys->i_starttime;
-                es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_sys->p_block->i_pts );
+                es_out_SetPCR( p_demux->out, p_sys->p_block->i_pts );
                 es_out_Send( p_demux->out, p_sys->es, p_sys->p_block );
                 p_sys->p_block = p_block;
             }
@@ -425,7 +426,10 @@ static int Open( vlc_object_t *p_this )
     demux_t      *p_demux = (demux_t*)p_this;
     demux_sys_t  *p_sys;
 
-    p_sys = calloc( 1, sizeof(demux_sys_t) );
+    if (p_demux->out == NULL)
+        return VLC_EGENERIC;
+
+    p_sys = vlc_obj_calloc( p_this, 1, sizeof(demux_sys_t) );
     if( !p_sys ) return VLC_ENOMEM;
 
     p_sys->f_fps = var_InheritFloat( p_demux, CFG_PREFIX "fps" );
@@ -440,7 +444,6 @@ static int Open( vlc_object_t *p_this )
     if ( !p_sys->p_instance )
     {
         msg_Err( p_demux, "rdp instantiation error" );
-        free( p_sys );
         return VLC_EGENERIC;
     }
 
@@ -490,7 +493,6 @@ static int Open( vlc_object_t *p_this )
 error:
     freerdp_free( p_sys->p_instance );
     free( p_sys->psz_hostname );
-    free( p_sys );
     return VLC_EGENERIC;
 }
 
@@ -518,5 +520,4 @@ static void Close( vlc_object_t *p_this )
         block_Release( p_sys->p_block );
 
     free( p_sys->psz_hostname );
-    free( p_sys );
 }

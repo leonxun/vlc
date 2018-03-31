@@ -28,7 +28,7 @@
 
 #include <vlc_vout.h>
 #include <vlc_vout_window.h>
-#include <vlc_keys.h>
+#include <vlc_actions.h>
 #include "../utils/position.hpp"
 #include "../commands/cmd_generic.hpp"
 #include "../controls/ctrl_video.hpp"
@@ -117,6 +117,9 @@ public:
 
     /// set fullscreen mode (vout window provider)
     void setFullscreenWnd( vout_window_t* pWnd, bool b_fullscreen );
+
+    /// hide mouse (vout window provider)
+    void hideMouseWnd( vout_window_t* pWnd, bool hide );
 
     // Register Video Controls (when building theme)
     void registerCtrlVideo( CtrlVideo* p_CtrlVideo );

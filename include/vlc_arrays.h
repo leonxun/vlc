@@ -37,6 +37,21 @@ static inline void *realloc_down( void *ptr, size_t size )
     return ret ? ret : ptr;
 }
 
+/**
+ * This wrapper around realloc() will free the input pointer when
+ * realloc() returns NULL. The use case ptr = realloc(ptr, newsize) will
+ * cause a memory leak when ptr pointed to a heap allocation before,
+ * leaving the buffer allocated but unreferenced. vlc_realloc() is a
+ * drop-in replacement for that use case (and only that use case).
+ */
+static inline void *realloc_or_free( void *p, size_t sz )
+{
+    void *n = realloc(p,sz);
+    if( !n )
+        free(p);
+    return n;
+}
+
 #define TAB_INIT( count, tab )                  \
   do {                                          \
     (count) = 0;                                \
@@ -157,7 +172,7 @@ static inline void *realloc_down( void *ptr, size_t size )
     if( (array).i_alloc < 10 )                                              \
         _ARRAY_ALLOC(array, 10 )                                            \
     else if( (array).i_alloc == (array).i_size )                            \
-        _ARRAY_ALLOC(array, (int)(array.i_alloc * 1.5) )                    \
+        _ARRAY_ALLOC(array, (int)((array).i_alloc * 1.5) )                    \
 }
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
@@ -261,12 +276,12 @@ static inline size_t vlc_array_count( vlc_array_t * p_array )
     return p_array->i_count;
 }
 
-#if defined (__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+#ifndef __cplusplus
 # define vlc_array_item_at_index(ar, idx) \
     _Generic((ar), \
         const vlc_array_t *: ((ar)->pp_elems[idx]), \
         vlc_array_t *: ((ar)->pp_elems[idx]))
-#elif defined (__cplusplus)
+#else
 static inline void *vlc_array_item_at_index( vlc_array_t *ar, size_t idx )
 {
     return ar->pp_elems[idx];
@@ -291,12 +306,12 @@ static inline ssize_t vlc_array_index_of_item( const vlc_array_t *ar,
 }
 
 /* Write */
-static inline void vlc_array_insert( vlc_array_t *ar, void *elem, int idx )
+static inline int vlc_array_insert( vlc_array_t *ar, void *elem, int idx )
 {
     void **pp = (void **)realloc( ar->pp_elems,
                                   sizeof( void * ) * (ar->i_count + 1) );
     if( unlikely(pp == NULL) )
-        abort();
+        return -1;
 
     size_t tail = ar->i_count - idx;
     if( tail > 0 )
@@ -305,17 +320,31 @@ static inline void vlc_array_insert( vlc_array_t *ar, void *elem, int idx )
     pp[idx] = elem;
     ar->i_count++;
     ar->pp_elems = pp;
+    return 0;
 }
 
-static inline void vlc_array_append( vlc_array_t *ar, void *elem )
+static inline void vlc_array_insert_or_abort( vlc_array_t *ar, void *elem, int idx )
+{
+    if( vlc_array_insert( ar, elem, idx ) )
+        abort();
+}
+
+static inline int vlc_array_append( vlc_array_t *ar, void *elem )
 {
     void **pp = (void **)realloc( ar->pp_elems,
                                   sizeof( void * ) * (ar->i_count + 1) );
     if( unlikely(pp == NULL) )
-        abort();
+        return -1;
 
     pp[ar->i_count++] = elem;
     ar->pp_elems = pp;
+    return 0;
+}
+
+static inline void vlc_array_append_or_abort( vlc_array_t *ar, void *elem )
+{
+    if( vlc_array_append( ar, elem ) != 0 )
+        abort();
 }
 
 static inline void vlc_array_remove( vlc_array_t *ar, size_t idx )
@@ -471,6 +500,16 @@ vlc_dictionary_keys_count( const vlc_dictionary_t * p_dict )
         for( p_entry = p_dict->p_entries[i]; p_entry; p_entry = p_entry->p_next ) count++;
     }
     return count;
+}
+
+static inline bool
+vlc_dictionary_is_empty( const vlc_dictionary_t * p_dict )
+{
+    if( p_dict->p_entries )
+        for( int i = 0; i < p_dict->i_size; i++ )
+            if( p_dict->p_entries[i] )
+                return false;
+    return true;
 }
 
 static inline char **

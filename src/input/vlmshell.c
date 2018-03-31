@@ -854,7 +854,7 @@ int ExecuteCommand( vlm_t *p_vlm, const char *psz_command,
     size_t i_command_len = strlen( psz_command );
     char *buf = malloc( i_command_len + 1 ), *psz_buf = buf;
     size_t i_ppsz_command_len = (3 + (i_command_len + 1) / 2);
-    char **ppsz_command = malloc( i_ppsz_command_len * sizeof(char *) );
+    char **ppsz_command = vlc_alloc( i_ppsz_command_len, sizeof(char *) );
     vlm_message_t *p_message = NULL;
     int i_ret = 0;
 
@@ -1535,6 +1535,7 @@ static vlm_message_t *vlm_Show( vlm_t *vlm, vlm_media_sys_t *media,
 
         /* We must destroy the parent node "show" of show2
          * and not the children */
+        free( show2->child );
         free( show2->psz_name );
         free( show2 );
 

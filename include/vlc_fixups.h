@@ -33,7 +33,7 @@
 
 /* C++11 says there's no need to define __STDC_*_MACROS when including
  * inttypes.h and stdint.h. */
-#if defined (__cplusplus) && (defined(__MINGW32__) || defined(__UCLIBC__))
+#if defined (__cplusplus) && (defined(__MINGW32__) || defined(__UCLIBC__) || defined(__native_client__))
 # ifndef __STDC_FORMAT_MACROS
 #  define __STDC_FORMAT_MACROS 1
 # endif
@@ -42,6 +42,18 @@
 # endif
 # ifndef __STDC_LIMIT_MACROS
 #  define __STDC_LIMIT_MACROS 1
+# endif
+#endif
+
+#ifndef __cplusplus
+# ifdef HAVE_THREADS_H
+#  include <threads.h>
+# elif !defined(thread_local)
+#  ifdef HAVE_THREAD_LOCAL
+#   define thread_local _Thread_local
+#  elif defined(_MSC_VER)
+#   define thread_local __declspec(thread)
+#  endif
 # endif
 #endif
 
@@ -76,7 +88,7 @@ typedef struct
 # include <stdio.h> /* FILE */
 #endif
 
-#if !defined (HAVE_POSIX_MEMALIGN) || \
+#if !defined (HAVE_ALIGNED_ALLOC) || \
     !defined (HAVE_MEMRCHR) || \
     !defined (HAVE_STRLCPY) || \
     !defined (HAVE_STRNDUP) || \
@@ -152,10 +164,6 @@ int vasprintf (char **, const char *, va_list);
 #endif
 
 /* string.h */
-#ifndef HAVE_FFSLL
-int ffsll(long long);
-#endif
-
 #ifndef HAVE_MEMRCHR
 void *memrchr(const void *, int, size_t);
 #endif
@@ -290,26 +298,36 @@ int setenv (const char *, const char *, int);
 int unsetenv (const char *);
 #endif
 
-#ifndef HAVE_POSIX_MEMALIGN
-int posix_memalign (void **, size_t, size_t);
+#ifndef HAVE_ALIGNED_ALLOC
+void *aligned_alloc(size_t, size_t);
+#endif
+
+#if defined (_WIN32) && defined(__MINGW32__)
+#define aligned_free(ptr)  __mingw_aligned_free(ptr)
+#elif defined (_WIN32) && defined(_MSC_VER)
+#define aligned_free(ptr)  _aligned_free(ptr)
+#else
+#define aligned_free(ptr)  free(ptr)
 #endif
 
 #if defined(__native_client__) && defined(__cplusplus)
 # define HAVE_USELOCALE
 #endif
 
+#if !defined(HAVE_NEWLOCALE) && defined(HAVE_CXX_LOCALE_T) && defined(__cplusplus)
+# include <locale>
+# define HAVE_NEWLOCALE
+#endif
+
 /* locale.h */
 #ifndef HAVE_USELOCALE
-#define LC_ALL_MASK      0
-#define LC_NUMERIC_MASK  0
-#define LC_MESSAGES_MASK 0
-#define LC_GLOBAL_LOCALE ((locale_t)(uintptr_t)1)
+# ifndef HAVE_NEWLOCALE
+#  define LC_ALL_MASK      0
+#  define LC_NUMERIC_MASK  0
+#  define LC_MESSAGES_MASK 0
+#  define LC_GLOBAL_LOCALE ((locale_t)(uintptr_t)1)
 typedef void *locale_t;
-static inline locale_t uselocale(locale_t loc)
-{
-    (void)loc;
-    return NULL;
-}
+
 static inline void freelocale(locale_t loc)
 {
     (void)loc;
@@ -317,6 +335,15 @@ static inline void freelocale(locale_t loc)
 static inline locale_t newlocale(int mask, const char * locale, locale_t base)
 {
     (void)mask; (void)locale; (void)base;
+    return NULL;
+}
+# else
+#  include <locale.h>
+# endif
+
+static inline locale_t uselocale(locale_t loc)
+{
+    (void)loc;
     return NULL;
 }
 #endif
@@ -391,9 +418,6 @@ struct if_nameindex
     unsigned if_index;
     char    *if_name;
 };
-# ifndef HAVE_IF_NAMETOINDEX
-#  define if_nametoindex(name)   atoi(name)
-# endif
 # define if_nameindex()         (errno = ENOBUFS, NULL)
 # define if_freenameindex(list) (void)0
 #endif
@@ -460,12 +484,9 @@ void *tsearch( const void *key, void **rootp, int(*cmp)(const void *, const void
 void *tfind( const void *key, const void **rootp, int(*cmp)(const void *, const void *) );
 void *tdelete( const void *key, void **rootp, int(*cmp)(const void *, const void *) );
 void twalk( const void *root, void(*action)(const void *nodep, VISIT which, int depth) );
+#endif /* HAVE_SEARCH_H */
+#ifndef HAVE_TDESTROY
 void tdestroy( void *root, void (*free_node)(void *nodep) );
-#else // HAVE_SEARCH_H
-# ifndef HAVE_TDESTROY
-void vlc_tdestroy( void *, void (*)(void *) );
-#  define tdestroy vlc_tdestroy
-# endif
 #endif
 
 /* Random numbers */
@@ -584,6 +605,10 @@ static const struct in6_addr in6addr_any =
 # include <errno.h>
 # ifndef EPROTO
 #  define EPROTO (ELAST + 1)
+# endif
+
+# ifndef HAVE_IF_NAMETOINDEX
+#  define if_nametoindex(name)  atoi(name)
 # endif
 #endif
 

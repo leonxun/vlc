@@ -25,14 +25,17 @@
 #define LIBVLC_INPUT_INTERNAL_H 1
 
 #include <stddef.h>
+#include <stdatomic.h>
 
 #include <vlc_access.h>
 #include <vlc_demux.h>
 #include <vlc_input.h>
-#include <vlc_vout.h>
+#include <vlc_viewpoint.h>
 #include <libvlc.h>
 #include "input_interface.h"
 #include "misc/interrupt.h"
+
+struct input_stats;
 
 /*****************************************************************************
  *  Private input fields
@@ -43,9 +46,9 @@
 /* input_source_t: gathers all information per input source */
 typedef struct
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
-    demux_t  *p_demux; /**< Demux plugin instance */
+    demux_t  *p_demux; /**< Demux object (most downstream) */
 
     /* Title infos for that input */
     bool         b_title_demux; /* Titles/Seekpoints provided by demux */
@@ -111,6 +114,8 @@ typedef struct input_thread_private_t
     es_out_t        *p_es_out;
     es_out_t        *p_es_out_display;
     vlc_viewpoint_t viewpoint;
+    bool            viewpoint_changed;
+    vlc_renderer_item_t *p_renderer;
 
     /* Title infos FIXME multi-input (not easy) ? */
     int          i_title;
@@ -145,26 +150,7 @@ typedef struct input_thread_private_t
     input_resource_t *p_resource_private;
 
     /* Stats counters */
-    struct {
-        counter_t *p_read_packets;
-        counter_t *p_read_bytes;
-        counter_t *p_input_bitrate;
-        counter_t *p_demux_read;
-        counter_t *p_demux_bitrate;
-        counter_t *p_demux_corrupted;
-        counter_t *p_demux_discontinuity;
-        counter_t *p_decoded_audio;
-        counter_t *p_decoded_video;
-        counter_t *p_decoded_sub;
-        counter_t *p_sout_sent_packets;
-        counter_t *p_sout_sent_bytes;
-        counter_t *p_sout_send_bitrate;
-        counter_t *p_played_abuffers;
-        counter_t *p_lost_abuffers;
-        counter_t *p_displayed_pictures;
-        counter_t *p_lost_pictures;
-        vlc_mutex_t counters_lock;
-    } counters;
+    struct input_stats *stats;
 
     /* Buffer of pending actions */
     vlc_mutex_t lock_control;
@@ -178,7 +164,7 @@ typedef struct input_thread_private_t
 
 static inline input_thread_private_t *input_priv(input_thread_t *input)
 {
-    return (void *)(((char *)input) - offsetof(input_thread_private_t, input));
+    return container_of(input, input_thread_private_t, input);
 }
 
 /***************************************************************************
@@ -218,6 +204,7 @@ enum input_control_e
     INPUT_CONTROL_RESTART_ES,
 
     INPUT_CONTROL_SET_VIEWPOINT,    // new absolute viewpoint
+    INPUT_CONTROL_SET_INITIAL_VIEWPOINT, // set initial viewpoint (generally from video)
     INPUT_CONTROL_UPDATE_VIEWPOINT, // update viewpoint relative to current
 
     INPUT_CONTROL_SET_AUDIO_DELAY,
@@ -225,11 +212,11 @@ enum input_control_e
 
     INPUT_CONTROL_ADD_SLAVE,
 
-    INPUT_CONTROL_ADD_SUBTITLE,
-
     INPUT_CONTROL_SET_RECORD_STATE,
 
     INPUT_CONTROL_SET_FRAME_NEXT,
+
+    INPUT_CONTROL_SET_RENDERER,
 };
 
 /* Internal helpers */
@@ -274,5 +261,39 @@ void input_SplitMRL( const char **, const char **, const char **,
 /* meta.c */
 void vlc_audio_replay_gain_MergeFromMeta( audio_replay_gain_t *p_dst,
                                           const vlc_meta_t *p_meta );
+
+/* item.c */
+void input_item_node_PostAndDelete( input_item_node_t *p_node );
+
+/* stats.c */
+typedef struct input_rate_t
+{
+    vlc_mutex_t lock;
+    uintmax_t updates;
+    uintmax_t value;
+    struct
+    {
+        uintmax_t value;
+        mtime_t   date;
+    } samples[2];
+} input_rate_t;
+
+struct input_stats {
+    input_rate_t input_bitrate;
+    input_rate_t demux_bitrate;
+    atomic_uintmax_t demux_corrupted;
+    atomic_uintmax_t demux_discontinuity;
+    atomic_uintmax_t decoded_audio;
+    atomic_uintmax_t decoded_video;
+    atomic_uintmax_t played_abuffers;
+    atomic_uintmax_t lost_abuffers;
+    atomic_uintmax_t displayed_pictures;
+    atomic_uintmax_t lost_pictures;
+};
+
+struct input_stats *input_stats_Create(void);
+void input_stats_Destroy(struct input_stats *);
+void input_rate_Add(input_rate_t *, uintmax_t);
+void input_stats_Compute(struct input_stats *, input_stats_t*);
 
 #endif

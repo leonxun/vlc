@@ -36,6 +36,7 @@
 @property (readwrite, weak) IBOutlet NSMenuItem *revealInFinderPlaylistMenuItem;
 @property (readwrite, weak) IBOutlet NSMenuItem *selectAllPlaylistMenuItem;
 @property (readwrite, weak) IBOutlet NSMenuItem *recursiveExpandPlaylistMenuItem;
+@property (readwrite, weak) IBOutlet NSMenuItem *recursiveCollapsePlaylistMenuItem;
 @property (readwrite, weak) IBOutlet NSMenuItem *addFilesToPlaylistMenuItem;
 
 @property (nonatomic, readwrite, weak) VLCPlaylistView *outlineView;
@@ -58,7 +59,7 @@
 - (IBAction)revealItemInFinder:(id)sender;
 - (IBAction)deleteItem:(id)sender;
 - (IBAction)selectAll:(id)sender;
-- (IBAction)recursiveExpandNode:(id)sender;
+- (IBAction)recursiveExpandOrCollapseNode:(id)sender;
 - (IBAction)showInfoPanel:(id)sender;
 - (IBAction)addFilesToPlaylist:(id)sender;
 
@@ -95,9 +96,5 @@
  * @param b_start starts playback of first item if true
  */
 - (void)addPlaylistItems:(NSArray*)o_array withParentItemId:(int)i_plItemId atPos:(int)i_position startPlayback:(BOOL)b_start;
-
-
-- (void)continuePlaybackWhereYouLeftOff:(input_thread_t *)p_input_thread;
-- (void)storePlaybackPositionForItem:(input_thread_t *)p_input_thread;
 
 @end

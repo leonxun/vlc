@@ -40,7 +40,7 @@
  * same (width/height/chroma/fps), at least for now.
  */
 static const char deinterlace_modes[][9]= {
-    ""
+    "auto",
     "discard",
     "blend",
     "mean",
@@ -73,7 +73,10 @@ static int DeinterlaceCallback(vlc_object_t *object, char const *cmd,
     char       *mode             = var_GetString(vout,  "deinterlace-mode");
     const bool is_needed         = var_GetBool(vout,    "deinterlace-needed");
     if (!mode || !DeinterlaceIsModeValid(mode))
+    {
+        free(mode);
         return VLC_EGENERIC;
+    }
 
     /* */
     char *old = var_CreateGetString(vout, "sout-deinterlace-mode");
@@ -109,7 +112,7 @@ void vout_InitInterlacingSupport(vout_thread_t *vout, bool is_interlaced)
     text.psz_string = _("Deinterlace");
     var_Change(vout, "deinterlace", VLC_VAR_SETTEXT, &text, NULL);
 
-    const module_config_t *optd = config_FindConfig(VLC_OBJECT(vout), "deinterlace");
+    const module_config_t *optd = config_FindConfig("deinterlace");
     var_Change(vout, "deinterlace", VLC_VAR_CLEARCHOICES, NULL, NULL);
     if (likely(optd != NULL))
         for (unsigned i = 0; i < optd->list_count; i++) {
@@ -125,7 +128,7 @@ void vout_InitInterlacingSupport(vout_thread_t *vout, bool is_interlaced)
     text.psz_string = _("Deinterlace mode");
     var_Change(vout, "deinterlace-mode", VLC_VAR_SETTEXT, &text, NULL);
 
-    const module_config_t *optm = config_FindConfig(VLC_OBJECT(vout), "deinterlace-mode");
+    const module_config_t *optm = config_FindConfig("deinterlace-mode");
     var_Change(vout, "deinterlace-mode", VLC_VAR_CLEARCHOICES, NULL, NULL);
     if (likely(optm != NULL))
         for (unsigned i = 0; i < optm->list_count; i++) {

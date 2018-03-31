@@ -254,7 +254,7 @@ static void *Thread(void *data)
             block_t *block = Shoot(demux);
 
             block->i_pts = block->i_dts = mdate();
-            es_out_Control(demux->out, ES_OUT_SET_PCR, block->i_pts);
+            es_out_SetPCR(demux->out, block->i_pts);
             es_out_Send(demux->out, sys->es, block);
         }
 
@@ -358,6 +358,9 @@ static const struct wl_registry_listener registry_cbs =
 static int Open(vlc_object_t *obj)
 {
     demux_t *demux = (demux_t *)obj;
+    if (demux->out == NULL)
+        return VLC_EGENERIC;
+
     demux_sys_t *sys = malloc(sizeof (*sys));
     if (unlikely(sys == NULL))
         return VLC_ENOMEM;

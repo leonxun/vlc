@@ -5,7 +5,7 @@ endif
 # Symlink a pseudo-bundle
 pseudo-bundle:
 	$(MKDIR_P) $(top_builddir)/bin/Contents/Resources/
-	$(LN_S) -hf $(abs_top_builddir)/modules/gui/macosx/UI $(top_builddir)/bin/Contents/Resources/English.lproj
+	$(LN_S) -hf $(abs_top_builddir)/modules/gui/macosx/UI $(top_builddir)/bin/Contents/Resources/Base.lproj
 	$(LN_S) -hf $(abs_top_builddir)/share/macosx/Info.plist $(top_builddir)/bin/Contents/Info.plist
 	$(LN_S) -hf $(CONTRIB_DIR)/Frameworks
 	cd $(top_builddir)/bin/Contents/Resources/ && find $(abs_top_srcdir)/modules/gui/macosx/Resources/ -type f -exec $(LN_S) -f {} \;
@@ -17,7 +17,7 @@ VLC.app: install
 	## Copy Contents
 	cp -R $(prefix)/share/macosx/ $@
 	## Copy .strings file and .nib files
-	cp -R $(top_builddir)/modules/gui/macosx/UI $@/Contents/Resources/English.lproj
+	cp -R $(top_builddir)/modules/gui/macosx/UI $@/Contents/Resources/Base.lproj
 	## Copy Info.plist and convert to binary
 	cp -R $(top_builddir)/share/macosx/Info.plist $@/Contents/
 	xcrun plutil -convert binary1 $@/Contents/Info.plist
@@ -30,22 +30,19 @@ endif
 if HAVE_BREAKPAD
 	cp -R $(CONTRIB_DIR)/Frameworks/Breakpad.framework $@/Contents/Frameworks
 endif
-	mkdir -p $@/Contents/MacOS/share/locale/
+	mkdir -p $@/Contents/MacOS/share/
 if BUILD_LUA
 	## Copy lua scripts
-	cp -r "$(prefix)/lib/vlc/lua" "$(prefix)/share/vlc/lua" $@/Contents/MacOS/share/
+	cp -r "$(pkgdatadir)/lua" $@/Contents/MacOS/share/
+	cp -r "$(pkglibexecdir)/lua" $@/Contents/MacOS/
 endif
+	## HRTFs
+	cp -r $(srcdir)/share/hrtfs $@/Contents/MacOS/share/
 	## Copy some other stuff (?)
 	mkdir -p $@/Contents/MacOS/include/
 	(cd "$(prefix)/include" && $(AMTAR) -c --exclude "plugins" vlc) | $(AMTAR) -x -C $@/Contents/MacOS/include/
 	## Copy translations
-	cat $(top_srcdir)/po/LINGUAS | while read i; do \
-	  $(INSTALL) -d $@/Contents/MacOS/share/locale/$${i}/LC_MESSAGES ; \
-	  $(INSTALL) $(srcdir)/po/$${i}.gmo $@/Contents/MacOS/share/locale/$${i}/LC_MESSAGES/vlc.mo; \
-	  mkdir -p $@/Contents/Resources/$${i}.lproj/ ; \
-	  $(LN_S) -f ../English.lproj/InfoPlist.strings ../English.lproj/MainMenu.nib \
-		$@/Contents/Resources/$${i}.lproj/ ; \
-	done
+	test -d "$(prefix)/share/locale" && cp -r "$(prefix)/share/locale" $@/Contents/MacOS/share/ || true
 	printf "APPLVLC#" >| $@/Contents/PkgInfo
 	## Copy libs
 	mkdir -p $@/Contents/MacOS/lib
@@ -53,6 +50,8 @@ endif
 	## Copy plugins
 	mkdir -p $@/Contents/MacOS/plugins
 	find $(prefix)/lib/vlc/plugins -name 'lib*_plugin.dylib' -maxdepth 2 -exec cp -a {} $@/Contents/MacOS/plugins \;
+	## Copy libbluray jar
+	find "$(CONTRIB_DIR)/share/java/" -name 'libbluray-j2se-*.jar' -maxdepth 1 -exec cp -a {} $@/Contents/MacOS/plugins \;
 	## Install binary
 	cp $(prefix)/bin/vlc $@/Contents/MacOS/VLC
 	## Generate plugin cache
@@ -62,6 +61,7 @@ endif
 
 
 package-macosx: VLC.app
+	rm -f "$(top_builddir)/vlc-$(VERSION).dmg"
 if HAVE_DMGBUILD
 	@echo "Packaging fancy DMG using dmgbuild"
 	cd "$(top_srcdir)/extras/package/macosx/dmg" && dmgbuild -s "dmg_settings.py" \
@@ -71,7 +71,7 @@ else !HAVE_DMGBUILD
 	## Create directory for DMG contents
 	mkdir -p "$(top_builddir)/vlc-$(VERSION)"
 	## Copy contents
-	cp -R "$(top_builddir)/VLC.app" "$(top_builddir)/vlc-$(VERSION)/VLC.app"
+	cp -Rp "$(top_builddir)/VLC.app" "$(top_builddir)/vlc-$(VERSION)/VLC.app"
 	## Symlink to Applications so users can easily drag-and-drop the App to it
 	$(LN_S) -f /Applications "$(top_builddir)/vlc-$(VERSION)/"
 	## Create DMG
@@ -82,11 +82,23 @@ else !HAVE_DMGBUILD
 endif
 
 package-macosx-zip: VLC.app
+	rm -f "$(top_builddir)/vlc-$(VERSION).zip"
 	mkdir -p $(top_builddir)/vlc-$(VERSION)/Goodies/
-	cp -R $(top_builddir)/VLC.app $(top_builddir)/vlc-$(VERSION)/VLC.app
+	cp -Rp $(top_builddir)/VLC.app $(top_builddir)/vlc-$(VERSION)/VLC.app
 	cd $(srcdir); cp -R AUTHORS COPYING README THANKS NEWS $(abs_top_builddir)/vlc-$(VERSION)/Goodies/
 	zip -r -y -9 $(top_builddir)/vlc-$(VERSION).zip $(top_builddir)/vlc-$(VERSION)
 	rm -rf "$(top_builddir)/vlc-$(VERSION)"
+
+package-macosx-release:
+	rm -f "$(top_builddir)/vlc-$(VERSION)-release.zip"
+	mkdir -p $(top_builddir)/vlc-$(VERSION)-release
+	cp -Rp $(top_builddir)/VLC.app $(top_builddir)/vlc-$(VERSION)-release/
+	cp $(srcdir)/extras/package/macosx/dmg/* $(top_builddir)/vlc-$(VERSION)-release/
+	cp "$(srcdir)/extras/package/macosx/codesign.sh" $(top_builddir)/vlc-$(VERSION)-release/
+	cp "$(pkglibexecdir)/vlc-cache-gen" $(top_builddir)/vlc-$(VERSION)-release/
+	install_name_tool -add_rpath "@executable_path/VLC.app/Contents/MacOS/lib" $(top_builddir)/vlc-$(VERSION)-release/vlc-cache-gen
+	zip -r -y -9 $(top_builddir)/vlc-$(VERSION)-release.zip $(top_builddir)/vlc-$(VERSION)-release
+	rm -rf "$(top_builddir)/vlc-$(VERSION)-release"
 
 package-translations:
 	mkdir -p "$(srcdir)/vlc-translations-$(VERSION)"
@@ -107,13 +119,14 @@ package-translations:
 	$(AMTAR) chof - $(srcdir)/vlc-translations-$(VERSION) \
 	  | GZIP=$(GZIP_ENV) gzip -c >$(srcdir)/vlc-translations-$(VERSION).tar.gz
 
-.PHONY: package-macosx package-macosx-zip package-translations pseudo-bundle
+.PHONY: package-macosx package-macosx-zip package-macosx-release package-translations pseudo-bundle
 
 ###############################################################################
 # Mac OS X project
 ###############################################################################
 
 EXTRA_DIST += \
+	extras/package/macosx/env.build.sh \
 	extras/package/macosx/build.sh \
 	extras/package/macosx/codesign.sh \
 	extras/package/macosx/configure.sh \

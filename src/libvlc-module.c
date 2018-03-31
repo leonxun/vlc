@@ -31,6 +31,8 @@
 # include "config.h"
 #endif
 
+#include <limits.h>
+
 #include <vlc_common.h>
 #include <vlc_plugin.h>
 #include <vlc_cpu.h>
@@ -39,7 +41,7 @@
 #include "modules/modules.h"
 
 //#define Nothing here, this is just to prevent update-po from being stupid
-#include "vlc_keys.h"
+#include "vlc_actions.h"
 #include "vlc_meta.h"
 #include <vlc_aout.h>
 
@@ -91,7 +93,7 @@ static const char *const ppsz_snap_formats[] =
 
 #define COLOR_TEXT N_("Color messages")
 #define COLOR_LONGTEXT N_( \
-    "This enables colorization of the messages sent to the console " \
+    "This enables colorization of the messages sent to the console. " \
     "Your terminal needs Linux color support for this to work.")
 
 #define ADVANCED_TEXT N_("Show advanced options")
@@ -187,11 +189,13 @@ static const char *const ppsz_force_dolby_descriptions[] = {
 #define STEREO_MODE_TEXT N_("Stereo audio output mode")
 static const int pi_stereo_mode_values[] = { AOUT_VAR_CHAN_UNSET,
     AOUT_VAR_CHAN_STEREO, AOUT_VAR_CHAN_RSTEREO,
-    AOUT_VAR_CHAN_LEFT, AOUT_VAR_CHAN_RIGHT, AOUT_VAR_CHAN_DOLBYS
+    AOUT_VAR_CHAN_LEFT, AOUT_VAR_CHAN_RIGHT, AOUT_VAR_CHAN_DOLBYS,
+    AOUT_VAR_CHAN_HEADPHONES,
 };
 static const char *const ppsz_stereo_mode_texts[] = { N_("Unset"),
     N_("Stereo"), N_("Reverse stereo"),
-    N_("Left"), N_("Right"), N_("Dolby Surround")
+    N_("Left"), N_("Right"), N_("Dolby Surround"),
+    N_("Headphones"),
 };
 
 #define AUDIO_FILTER_TEXT N_("Audio filters")
@@ -312,7 +316,7 @@ static const char *const ppsz_align_descriptions[] =
 #define VIDEO_ON_TOP_LONGTEXT N_( \
     "Always place the video window on top of other windows." )
 
-#define WALLPAPER_TEXT N_("Enable wallpaper mode ")
+#define WALLPAPER_TEXT N_("Enable wallpaper mode")
 #define WALLPAPER_LONGTEXT N_( \
     "The wallpaper mode allows you to display the video as the desktop " \
     "background." )
@@ -349,12 +353,12 @@ static const char * const  ppsz_deinterlace_text[] = {
 #define DEINTERLACE_MODE_LONGTEXT N_( \
     "Deinterlace method to use for video processing.")
 static const char * const ppsz_deinterlace_mode[] = {
-    "discard", "blend", "mean", "bob",
+    "auto", "discard", "blend", "mean", "bob",
     "linear", "x", "yadif", "yadif2x", "phosphor",
     "ivtc"
 };
 static const char * const ppsz_deinterlace_mode_text[] = {
-    N_("Discard"), N_("Blend"), N_("Mean"), N_("Bob"),
+    N_("Auto"), N_("Discard"), N_("Blend"), N_("Mean"), N_("Bob"),
     N_("Linear"), "X", "Yadif", "Yadif (2x)", N_("Phosphor"),
     N_("Film NTSC (IVTC)")
 };
@@ -366,10 +370,6 @@ static const char *const ppsz_pos_descriptions[] =
 
 #define SS_TEXT N_("Disable screensaver")
 #define SS_LONGTEXT N_("Disable the screensaver during video playback." )
-
-#define INHIBIT_TEXT N_("Inhibit the power management daemon during playback")
-#define INHIBIT_LONGTEXT N_("Inhibits the power management daemon during any " \
-    "playback, to avoid the computer being suspended because of inactivity.")
 
 #define VIDEO_DECO_TEXT N_("Window decorations")
 #define VIDEO_DECO_LONGTEXT N_( \
@@ -609,6 +609,10 @@ static const char *const ppsz_clock_descriptions[] =
 #define INPUT_SUBTRACK_ID_LONGTEXT N_( \
     "Stream ID of the subtitle track to use.")
 
+#define INPUT_CAPTIONS_TEXT N_(N_("Preferred Closed Captions decoder"))
+static const int pi_captions[] = { 608, 708 };
+static const char *const ppsz_captions[] = { "EIA/CEA 608", "CEA 708" };
+
 #define INPUT_PREFERREDRESOLUTION_TEXT N_("Preferred video resolution")
 #define INPUT_PREFERREDRESOLUTION_LONGTEXT N_( \
     "When several video formats are available, select one whose " \
@@ -688,6 +692,8 @@ static const char *const ppsz_prefres[] = {
     "$n: Track num<br>$p: Now playing<br>$A: Date<br>$D: Duration<br>"  \
     "$Z: \"Now playing\" (Fall back on Title - Artist)" )
 
+#define INPUT_LUA_TEXT N_( "Disable all lua plugins" )
+
 // DEPRECATED
 #define SUB_CAT_LONGTEXT N_( \
     "These options allow you to modify the behavior of the subpictures " \
@@ -702,7 +708,7 @@ static const char *const ppsz_prefres[] = {
     "instead of over the movie. Try several positions.")
 
 #define SUB_TEXT_SCALE_TEXT N_("Subtitles text scaling factor")
-#define SUB_TEXT_SCALE_LONGTEXT N_("Set value to alter subtitles size where possible")
+#define SUB_TEXT_SCALE_LONGTEXT N_("Changes the subtitles size where possible")
 
 #define SPU_TEXT N_("Enable sub-pictures")
 #define SPU_LONGTEXT N_( \
@@ -837,6 +843,16 @@ static const char *const ppsz_prefres[] = {
 #define HTTP_KEY_TEXT N_("HTTP/TLS server private key")
 #define KEY_LONGTEXT N_( \
    "This private key file (PEM format) is used for server-side TLS.")
+
+#define PROXY_TEXT N_("HTTP proxy")
+#define PROXY_LONGTEXT N_( \
+    "HTTP proxy to be used It must be of the form " \
+    "http://[user@]myproxy.mydomain:myport/ ; " \
+    "if empty, the http_proxy environment variable will be tried." )
+
+#define PROXY_PASS_TEXT N_("HTTP proxy password")
+#define PROXY_PASS_LONGTEXT N_( \
+    "If your HTTP proxy requires a password, set it here." )
 
 #define SOCKS_SERVER_TEXT N_("SOCKS server")
 #define SOCKS_SERVER_LONGTEXT N_( \
@@ -990,11 +1006,11 @@ static const char *const ppsz_prefres[] = {
 
 #define STREAM_FILTER_TEXT N_("Stream filter module")
 #define STREAM_FILTER_LONGTEXT N_( \
-    "Stream filters are used to modify the stream that is being read. " )
+    "Stream filters are used to modify the stream that is being read." )
 
 #define DEMUX_FILTER_TEXT N_("Demux filter module")
 #define DEMUX_FILTER_LONGTEXT N_( \
-    "Demux filters are used to modify/control the stream that is being read. " )
+    "Demux filters are used to modify/control the stream that is being read." )
 
 #define DEMUX_TEXT N_("Demux module")
 #define DEMUX_LONGTEXT N_( \
@@ -1041,8 +1057,7 @@ static const char *const ppsz_prefres[] = {
 
 #define KEYSTORE_TEXT N_("Preferred keystore list")
 #define KEYSTORE_LONGTEXT N_( \
-    "List of keystores that VLC will use in " \
-    "priority. Only advanced users should alter this option." )
+    "List of keystores that VLC will use in priority." )
 
 #define STATS_TEXT N_("Locally collect statistics")
 #define STATS_LONGTEXT N_( \
@@ -1057,23 +1072,12 @@ static const char *const ppsz_prefres[] = {
        "Writes process id into specified file.")
 
 #define ONEINSTANCE_TEXT N_("Allow only one running instance")
-#if defined( _WIN32 ) || defined( __OS2__ )
 #define ONEINSTANCE_LONGTEXT N_( \
     "Allowing only one running instance of VLC can sometimes be useful, " \
     "for example if you associated VLC with some media types and you " \
     "don't want a new instance of VLC to be opened each time you " \
     "open a file in your file manager. This option will allow you " \
     "to play the file with the already running instance or enqueue it.")
-#elif defined( HAVE_DBUS )
-#define ONEINSTANCE_LONGTEXT N_( \
-    "Allowing only one running instance of VLC can sometimes be useful, " \
-    "for example if you associated VLC with some media types and you " \
-    "don't want a new instance of VLC to be opened each time you " \
-    "open a file in your file manager. This option will allow you " \
-    "to play the file with the already running instance or enqueue it. " \
-    "This option requires the D-Bus session daemon to be active " \
-    "and the running instance of VLC to use D-Bus control interface.")
-#endif
 
 #define STARTEDFROMFILE_TEXT N_("VLC is started from file association")
 #define STARTEDFROMFILE_LONGTEXT N_( \
@@ -1097,6 +1101,10 @@ static const char *const ppsz_prefres[] = {
     "When using the one instance only option, enqueue items to playlist " \
     "and keep playing current item.")
 
+#define DBUS_TEXT N_("Expose media player via D-Bus")
+#define DBUS_LONGTEXT N_("Allow other applications to control VLC " \
+    "using the D-Bus MPRIS protocol.")
+
 /*****************************************************************************
  * Playlist
  ****************************************************************************/
@@ -1113,9 +1121,32 @@ static const char *const ppsz_prefres[] = {
 
 #define PREPARSE_TIMEOUT_TEXT N_( "Preparsing timeout" )
 #define PREPARSE_TIMEOUT_LONGTEXT N_( \
-    "Maximum time (in milliseconds) allowed to preparse an item" )
+    "Maximum time allowed to preparse an item, in milliseconds" )
 
 #define METADATA_NETWORK_TEXT N_( "Allow metadata network access" )
+
+static const char *const psz_recursive_list[] = {
+    "none", "collapse", "expand" };
+static const char *const psz_recursive_list_text[] = {
+    N_("None"), N_("Collapse"), N_("Expand") };
+
+#define RECURSIVE_TEXT N_("Subdirectory behavior")
+#define RECURSIVE_LONGTEXT N_( \
+        "Select whether subdirectories must be expanded.\n" \
+        "none: subdirectories do not appear in the playlist.\n" \
+        "collapse: subdirectories appear but are expanded on first play.\n" \
+        "expand: all subdirectories are expanded.\n" )
+
+#define IGNORE_TEXT N_("Ignored extensions")
+#define IGNORE_LONGTEXT N_( \
+        "Files with these extensions will not be added to playlist when " \
+        "opening a directory.\n" \
+        "This is useful if you add directories that contain playlist files " \
+        "for instance. Use a comma-separated list of extensions." )
+
+#define SHOW_HIDDENFILES_TEXT N_("Show hidden files")
+#define SHOW_HIDDENFILES_LONGTEXT N_( \
+        "Ignore files starting with '.'" )
 
 #define SD_TEXT N_( "Services discovery modules")
 #define SD_LONGTEXT N_( \
@@ -1617,7 +1648,7 @@ vlc_module_begin ()
                  DEINTERLACE_TEXT, DEINTERLACE_LONGTEXT, false )
         change_integer_list( pi_deinterlace, ppsz_deinterlace_text )
         change_safe()
-    add_string( "deinterlace-mode", "blend",
+    add_string( "deinterlace-mode", "auto",
                 DEINTERLACE_MODE_TEXT, DEINTERLACE_MODE_LONGTEXT, false )
         change_string_list( ppsz_deinterlace_mode, ppsz_deinterlace_mode_text )
         change_safe()
@@ -1710,6 +1741,10 @@ vlc_module_begin ()
     add_integer( "sub-track-id", -1,
                  INPUT_SUBTRACK_ID_TEXT, INPUT_SUBTRACK_ID_LONGTEXT, true )
         change_safe ()
+    add_integer( "captions", 608,
+                 INPUT_CAPTIONS_TEXT, INPUT_CAPTIONS_TEXT, true )
+        change_integer_list( pi_captions, ppsz_captions )
+        change_safe ()
     add_integer( "preferred-resolution", -1, INPUT_PREFERREDRESOLUTION_TEXT,
                  INPUT_PREFERREDRESOLUTION_LONGTEXT, false )
         change_safe ()
@@ -1758,6 +1793,7 @@ vlc_module_begin ()
     add_obsolete_bool( "ipv4" ) /* since 2.0.0 */
     add_integer( "ipv4-timeout", 5 * 1000, TIMEOUT_TEXT,
                  TIMEOUT_LONGTEXT, true )
+        change_integer_range( 0, INT_MAX )
 
     add_string( "http-host", NULL, HTTP_HOST_TEXT, HOST_LONGTEXT, true )
     add_integer( "http-port", 8080, HTTP_PORT_TEXT, HTTP_PORT_LONGTEXT, true )
@@ -1775,6 +1811,18 @@ vlc_module_begin ()
     add_obsolete_string( "sout-http-ca" ) /* since 2.0.0 */
     add_obsolete_string( "http-crl" ) /* since 3.0.0 */
     add_obsolete_string( "sout-http-crl" ) /* since 2.0.0 */
+
+#ifdef _WIN32
+    add_string( "http-proxy", NULL, PROXY_TEXT, PROXY_LONGTEXT,
+                false )
+    add_password( "http-proxy-pwd", NULL,
+                  PROXY_PASS_TEXT, PROXY_PASS_LONGTEXT, false )
+#else
+    add_obsolete_string( "http-proxy" )
+    add_obsolete_string( "http-proxy-pwd" )
+
+#endif
+    add_obsolete_bool( "http-use-IE-proxy" )
 
     set_section( N_( "Socks proxy") , NULL )
     add_string( "socks", NULL,
@@ -1881,6 +1929,8 @@ vlc_module_begin ()
                  INPUT_TIMESHIFT_GRANULARITY_LONGTEXT, true )
 
     add_string( "input-title-format", "$Z", INPUT_TITLE_FORMAT_TEXT, INPUT_TITLE_FORMAT_LONGTEXT, false );
+
+    add_bool( "lua", true, INPUT_LUA_TEXT, INPUT_LUA_TEXT, true );
 
 /* Decoder options */
     set_subcategory( SUBCAT_INPUT_VCODEC )
@@ -2000,8 +2050,7 @@ vlc_module_begin ()
 #endif
 
 #if defined(HAVE_DBUS)
-    add_bool( "inhibit", 1, INHIBIT_TEXT,
-              INHIBIT_LONGTEXT, true )
+    add_obsolete_bool( "inhibit" ) /* since 3.0.0 */
 #endif
 
 #if defined(_WIN32) || defined(__OS2__)
@@ -2049,6 +2098,9 @@ vlc_module_begin ()
     add_bool( "playlist-enqueue", 0, PLAYLISTENQUEUE_TEXT,
               PLAYLISTENQUEUE_LONGTEXT, true )
 #endif
+#ifdef HAVE_DBUS
+    add_bool( "dbus", false, DBUS_TEXT, DBUS_LONGTEXT, true )
+#endif
     add_bool( "media-library", 0, ML_TEXT, ML_LONGTEXT, false )
     add_bool( "playlist-tree", 0, PLTREE_TEXT, PLTREE_LONGTEXT, false )
 
@@ -2063,6 +2115,19 @@ vlc_module_begin ()
     add_obsolete_integer( "album-art" )
     add_bool( "metadata-network-access", false, METADATA_NETWORK_TEXT,
                  METADATA_NETWORK_TEXT, false )
+
+    add_string( "recursive", "collapse" , RECURSIVE_TEXT,
+                RECURSIVE_LONGTEXT, false )
+        change_string_list( psz_recursive_list, psz_recursive_list_text )
+    add_string( "ignore-filetypes", "m3u,db,nfo,ini,jpg,jpeg,ljpg,gif,png,pgm,"
+                "pgmyuv,pbm,pam,tga,bmp,pnm,xpm,xcf,pcx,tif,tiff,lbm,sfv,txt,"
+                "sub,idx,srt,cue,ssa",
+                IGNORE_TEXT, IGNORE_LONGTEXT, false )
+    add_bool( "show-hiddenfiles", false,
+              SHOW_HIDDENFILES_TEXT, SHOW_HIDDENFILES_LONGTEXT, false )
+    add_bool( "extractor-flatten", false,
+              "Flatten files listed by extractors (archive)", NULL, true )
+        change_volatile()
 
     set_subcategory( SUBCAT_PLAYLIST_SD )
     add_string( "services-discovery", "", SD_TEXT, SD_LONGTEXT, true )
@@ -2758,3 +2823,7 @@ vlc_module_end ()
 /*****************************************************************************
  * End configuration.
  *****************************************************************************/
+
+#ifdef HAVE_DYNAMIC_PLUGINS
+const char vlc_module_name[] = "main";
+#endif

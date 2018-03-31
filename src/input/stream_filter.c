@@ -53,8 +53,11 @@ stream_t *vlc_stream_FilterNew( stream_t *p_source,
         s->psz_url = strdup( p_source->psz_url );
         if( unlikely(s->psz_url == NULL) )
             goto error;
+
+        if( p_source->psz_filepath != NULL )
+            s->psz_filepath = strdup( p_source->psz_filepath );
     }
-    s->p_source = p_source;
+    s->s = p_source;
 
     /* */
     s->p_module = module_need( s, "stream_filter", psz_stream_filter, true );
@@ -63,6 +66,7 @@ stream_t *vlc_stream_FilterNew( stream_t *p_source,
 
     return s;
 error:
+    free(s->psz_filepath);
     stream_CommonDelete( s );
     return NULL;
 }
@@ -111,12 +115,14 @@ static void StreamDelete( stream_t *s )
 {
     module_unneed( s, s->p_module );
 
-    if( s->p_source )
-        vlc_stream_Delete( s->p_source );
+    if( s->s != NULL )
+        vlc_stream_Delete( s->s );
+
+    free(s->psz_filepath);
 }
 
 int vlc_stream_FilterDefaultReadDir( stream_t *s, input_item_node_t *p_node )
 {
-    assert( s->p_source != NULL );
-    return vlc_stream_ReadDir( s->p_source, p_node );
+    assert( s->s != NULL );
+    return vlc_stream_ReadDir( s->s, p_node );
 }

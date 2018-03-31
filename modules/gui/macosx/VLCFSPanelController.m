@@ -80,17 +80,8 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
     /* Set autosave name after we changed window mask to resizable */
     [self.window setFrameAutosaveName:@"VLCFullscreenControls"];
 
-#ifdef MAC_OS_X_VERSION_10_10
     /* Inject correct background view depending on OS support */
-    if (OSX_YOSEMITE_OR_HIGHER) {
-        [self injectVisualEffectView];
-    } else {
-        [self injectBackgroundView];
-    }
-#else
-    /* Compiled with old SDK, always use legacy style */
-    [self injectBackgroundView];
-#endif
+    [self injectVisualEffectView];
 
     [self setupControls];
 }
@@ -107,33 +98,39 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
     /* Setup translations for buttons */
     setupButton(_playPauseButton,
                 _NS("Play/Pause"),
-                _NS("Click to play or pause the current media."));
+                _NS("Play/Pause the current media"));
     setupButton(_nextButton,
                 _NS("Next"),
-                _NS("Click to go to the next playlist item."));
+                _NS("Go to next item"));
     setupButton(_previousButton,
                 _NS("Previous"),
-                _NS("Click to go to the previous playlist item."));
+                _NS("Go to the previous item"));
     setupButton(_forwardButton,
                 _NS("Forward"),
-                _NS("Click and hold to skip forward through the current media."));
+                _NS("Seek forward"));
     setupButton(_backwardButton,
                 _NS("Backward"),
-                _NS("Click and hold to skip backward through the current media."));
+                _NS("Seek backward"));
     setupButton(_fullscreenButton,
                 _NS("Toggle Fullscreen mode"),
-                _NS("Click to exit fullscreen playback."));
+                _NS("Leave fullscreen mode"));
     setupButton(_volumeSlider,
                 _NS("Volume"),
-                _NS("Drag to adjust the volume."));
+                _NS("Adjust the volume"));
     setupButton(_timeSlider,
                 _NS("Position"),
-                _NS("Drag to adjust the current playback position."));
+                _NS("Adjust the current playback position"));
 
     /* Setup other controls */
     [_volumeSlider setMaxValue:[[VLCCoreInteraction sharedInstance] maxVolume]];
     [_volumeSlider setIntValue:AOUT_VOLUME_DEFAULT];
     [_volumeSlider setDefaultValue:AOUT_VOLUME_DEFAULT];
+
+    /* Identifier to store the state of the remaining or total time label,
+     * this is the same identifier as used for the window playback cotrols
+     * so the state is shared between those.
+     */
+    [_remainingOrTotalTime setRemainingIdentifier:@"DisplayTimeAsTimeRemaining"];
 }
 
 #undef setupButton
@@ -301,6 +298,9 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
 
 - (void)fadeIn
 {
+    if (!var_InheritBool(getIntf(), "macosx-fspanel"))
+        return;
+
     [NSAnimationContext beginGrouping];
     [[NSAnimationContext currentContext] setDuration:0.4f];
     [[self.window animator] setAlphaValue:1.0f];
@@ -425,10 +425,6 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
 #pragma mark -
 #pragma mark Helpers
 
-#ifdef MAC_OS_X_VERSION_10_10
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wpartial-availability"
-
 /**
  Create an image mask for the NSVisualEffectView
  with rounded corners in the given rect
@@ -462,7 +458,6 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
  This is necessary as we can't use the NSVisualEffect view on
  all macOS Versions and therefore need to dynamically insert it.
 
- \warning Never call both, \c injectVisualEffectView and \c injectBackgroundView
  */
 - (void)injectVisualEffectView
 {
@@ -478,37 +473,6 @@ static NSString *kAssociatedFullscreenRect = @"VLCFullscreenAssociatedWindowRect
     [self.window setContentView:view];
     [_controlsView setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameVibrantDark]];
     [self.window.contentView addSubview:_controlsView];
-}
-#pragma clang diagnostic pop
-#endif
-
-/**
- Injects the standard background view in the Windows view hierarchy
-
- This is necessary on macOS versions that do not support the
- NSVisualEffectView that usually is injected.
-
- \warning Never call both, \c injectVisualEffectView and \c injectBackgroundView
- */
-- (void)injectBackgroundView
-{
-    /* Setup the view */
-    CGColorRef color = CGColorCreateGenericGray(0.0, 0.8);
-    NSView *view = [[NSView alloc] initWithFrame:self.window.contentView.frame];
-    [view setWantsLayer:YES];
-    [view.layer setBackgroundColor:color];
-    [view.layer setCornerRadius:8.0];
-    [view setAutoresizesSubviews:YES];
-    CGColorRelease(color);
-
-    /* Inject view in view hierarchy */
-    [self.window setContentView:view];
-    [self.window.contentView addSubview:_controlsView];
-
-    /* Disable adjusting height to workaround autolayout problems */
-    [_heightMaxConstraint setConstant:42.0];
-    [self.window setMaxSize:NSMakeSize(4068, 80)];
-    [self.window setMinSize:NSMakeSize(480, 80)];
 }
 
 - (void)dealloc

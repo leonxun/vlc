@@ -73,6 +73,8 @@ static int InitVideo (demux_t *, int fd, uint32_t caps);
 int DemuxOpen( vlc_object_t *obj )
 {
     demux_t *demux = (demux_t *)obj;
+    if (demux->out == NULL)
+        return VLC_EGENERIC;
 
     demux_sys_t *sys = malloc (sizeof (*sys));
     if (unlikely(sys == NULL))
@@ -105,9 +107,6 @@ int DemuxOpen( vlc_object_t *obj )
     sys->start = mdate ();
     demux->pf_demux = NULL;
     demux->pf_control = DemuxControl;
-    demux->info.i_update = 0;
-    demux->info.i_title = 0;
-    demux->info.i_seekpoint = 0;
     return VLC_SUCCESS;
 error:
     free (sys);
@@ -392,6 +391,7 @@ static int InitVideo (demux_t *demux, int fd, uint32_t caps)
     es_format_t es_fmt;
 
     es_format_Init (&es_fmt, VIDEO_ES, selected->vlc);
+    es_fmt.video.i_chroma = selected->vlc;
     es_fmt.video.i_rmask = selected->red;
     es_fmt.video.i_gmask = selected->green;
     es_fmt.video.i_bmask = selected->blue;
@@ -714,7 +714,7 @@ static void *UserPtrThread (void *data)
         block->i_buffer = buf.length;
         block->i_pts = block->i_dts = GetBufferPTS (&buf);
         block->i_flags |= sys->block_flags;
-        es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts);
+        es_out_SetPCR(demux->out, block->i_pts);
         es_out_Send (demux->out, sys->es, block);
     }
     vlc_restorecancel (canc); /* <- hmm, this is purely cosmetic */
@@ -758,7 +758,7 @@ static void *MmapThread (void *data)
             if (block != NULL)
             {
                 block->i_flags |= sys->block_flags;
-                es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts);
+                es_out_SetPCR(demux->out, block->i_pts);
                 es_out_Send (demux->out, sys->es, block);
             }
             vlc_restorecancel (canc);
@@ -819,7 +819,7 @@ static void *ReadThread (void *data)
             if (val != -1)
             {
                 block->i_buffer = val;
-                es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts);
+                es_out_SetPCR(demux->out, block->i_pts);
                 es_out_Send (demux->out, sys->es, block);
             }
             else

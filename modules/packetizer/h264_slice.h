@@ -37,7 +37,7 @@ typedef struct
 
     enum h264_slice_type_e type;
     int i_pic_parameter_set_id;
-    int i_frame_num;
+    unsigned i_frame_num;
 
     int i_field_pic_flag;
     int i_bottom_field_flag;
@@ -59,7 +59,7 @@ static inline void h264_slice_init( h264_slice_t *p_slice )
     p_slice->i_nal_type = -1;
     p_slice->i_nal_ref_idc = -1;
     p_slice->i_idr_pic_id = -1;
-    p_slice->i_frame_num = -1;
+    p_slice->i_frame_num = 0;
     p_slice->type = H264_SLICE_TYPE_UNKNOWN;
     p_slice->i_pic_parameter_set_id = -1;
     p_slice->i_field_pic_flag = 0;
@@ -90,9 +90,9 @@ typedef struct
     int  prevRefPictureTFOC;
     bool prevRefPictureIsBottomField;
     bool prevRefPictureHasMMCO5;
-} poc_context_t;
+} h264_poc_context_t;
 
-static inline void h264_poc_context_init( poc_context_t *p_ctx )
+static inline void h264_poc_context_init( h264_poc_context_t *p_ctx )
 {
     p_ctx->prevPicOrderCnt.lsb = 0;
     p_ctx->prevPicOrderCnt.msb = 0;
@@ -103,7 +103,7 @@ static inline void h264_poc_context_init( poc_context_t *p_ctx )
 }
 
 void h264_compute_poc( const h264_sequence_parameter_set_t *p_sps,
-                       const h264_slice_t *p_slice, poc_context_t *p_ctx,
+                       const h264_slice_t *p_slice, h264_poc_context_t *p_ctx,
                        int *p_PictureOrderCount, int *p_tFOC, int *p_bFOC );
 
 uint8_t h264_get_num_ts( const h264_sequence_parameter_set_t *p_sps,

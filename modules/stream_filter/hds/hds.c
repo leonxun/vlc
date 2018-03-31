@@ -30,7 +30,6 @@
 #include <vlc_strings.h>            /* b64_decode */
 #include <vlc_xml.h>
 #include <vlc_charset.h>            /* FromCharset */
-#include <vlc_es.h>                 /* UNKNOWN_ES */
 
 typedef struct chunk_s
 {
@@ -208,7 +207,7 @@ vlc_module_begin()
     set_subcategory( SUBCAT_INPUT_STREAM_FILTER )
     set_description( N_("HTTP Dynamic Streaming") )
     set_shortname( "Dynamic Streaming")
-    set_capability( "stream_filter", 30 )
+    set_capability( "stream_filter", 330 )
     set_callbacks( Open, Close )
 vlc_module_end()
 
@@ -223,8 +222,8 @@ static inline bool isFQUrl( const char* url )
 
 static bool isHDS( stream_t *s )
 {
-    const char *peek;
-    int i_size = vlc_stream_Peek( s->p_source, (const uint8_t**) &peek, 200 );
+    const uint8_t *peek;
+    int i_size = vlc_stream_Peek( s->s, &peek, 200 );
     if( i_size < 200 )
         return false;
 
@@ -239,7 +238,7 @@ static bool isHDS( stream_t *s )
         str = FromCharset( "UTF-16BE", peek, i_size );
     }
     else
-        str = strndup( peek, i_size );
+        str = strndup( (const char *)peek, i_size );
 
     if( str == NULL )
         return false;
@@ -964,6 +963,7 @@ static chunk_t* generate_new_chunk(
             if( frun_entry == hds_stream->fragment_run_count - 1 )
             {
                 msg_Err( p_this, "Discontinuity but can't find next timestamp!");
+                chunk_free( chunk );
                 return NULL;
             }
 
@@ -1181,7 +1181,7 @@ static void* live_thread( void* p )
 static int init_Manifest( stream_t *s, manifest_t *m )
 {
     memset(m, 0, sizeof(*m));
-    stream_t *st = s->p_source;
+    stream_t *st = s->s;
 
     m->vlc_reader = xml_ReaderCreate( st, st );
     if( !m->vlc_reader )
@@ -1297,7 +1297,7 @@ static void initialize_header_and_metadata( stream_sys_t* p_sys, hds_stream_t *s
 
 static int parse_Manifest( stream_t *s, manifest_t *m )
 {
-    int type = UNKNOWN_ES;
+    int type = 0;
 
     msg_Dbg( s, "Manifest parsing\n" );
 
@@ -1329,10 +1329,16 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
         case XML_READER_STARTELEM:
             if( current_element_idx == 0 && element_stack[current_element_idx] == 0 ) {
                 if( !( element_stack[current_element_idx] = strdup( node ) ) )
+                {
+                    free(media_id);
                     return VLC_ENOMEM;
+                }
             } else {
                 if ( !( element_stack[++current_element_idx] = strdup( node ) ) )
+                {
+                    free(media_id);
                     return VLC_ENOMEM;
+                }
             }
 
             break;
@@ -1362,6 +1368,7 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
             if( media_idx == MAX_MEDIA_ELEMENTS )
             {
                 msg_Err( (vlc_object_t*) s, "Too many media elements, quitting" );
+                free(media_id);
                 return VLC_EGENERIC;
             }
 
@@ -1370,17 +1377,26 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
                 if( !strcmp(attr_name, "streamId" ) )
                 {
                     if( !( medias[media_idx].stream_id = strdup( attr_value ) ) )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
                 }
                 else if( !strcmp(attr_name, "url" ) )
                 {
                     if( !( medias[media_idx].media_url = strdup( attr_value ) ) )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
                 }
                 else if( !strcmp(attr_name, "bootstrapInfoId" ) )
                 {
                     if( !( medias[media_idx].bootstrap_id = strdup( attr_value ) ) )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
                 }
                 else if( !strcmp(attr_name, "bitrate" ) )
                 {
@@ -1397,17 +1413,26 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
                 if( !strcmp(attr_name, "url" ) )
                 {
                     if( !( bootstraps[bootstrap_idx].url = strdup( attr_value ) ) )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
                 }
                 else if( !strcmp(attr_name, "id" ) )
                 {
                     if( !( bootstraps[bootstrap_idx].id = strdup( attr_value ) ) )
-                       return VLC_ENOMEM;
+                    {
+                        free(media_id);
+                        return VLC_ENOMEM;
+                    }
                 }
                 else if( !strcmp(attr_name, "profile" ) )
                 {
                     if( !( bootstraps[bootstrap_idx].profile = strdup( attr_value ) ) )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
                 }
             }
         }
@@ -1457,7 +1482,10 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
                         vlc_b64_decode_binary( (uint8_t**)&medias[mi].metadata, start );
 
                     if ( ! medias[mi].metadata )
+                    {
+                        free(media_id);
                         return VLC_ENOMEM;
+                    }
 
                     uint8_t *end_marker =
                         medias[mi].metadata + medias[mi].metadata_len - sizeof(amf_object_end);
@@ -1566,7 +1594,7 @@ static int parse_Manifest( stream_t *s, manifest_t *m )
 
                 new_stream->bitrate = medias[i].bitrate;
 
-                vlc_array_append( &sys->hds_streams, new_stream );
+                vlc_array_append_or_abort( &sys->hds_streams, new_stream );
 
                 msg_Info( (vlc_object_t*)s, "New track with quality_segment(%s), bitrate(%u), timescale(%u), movie_id(%s), segment_run_count(%d), fragment_run_count(%u)",
                           new_stream->quality_segment_modifier?new_stream->quality_segment_modifier:"", new_stream->bitrate, new_stream->timescale,
@@ -1642,6 +1670,12 @@ static int Open( vlc_object_t *p_this )
 
     /* remove the last part of the url */
     char *pos = strrchr( uri_without_query, '/');
+    if ( pos == NULL )
+    {
+        free( uri_without_query );
+        free( p_sys );
+        return VLC_EGENERIC;
+    }
     *pos = '\0';
     p_sys->base_url = uri_without_query;
 

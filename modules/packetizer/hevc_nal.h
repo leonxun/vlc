@@ -175,39 +175,94 @@ uint8_t hevc_get_sps_vps_id( const hevc_sequence_parameter_set_t * );
 uint8_t hevc_get_pps_sps_id( const hevc_picture_parameter_set_t * );
 uint8_t hevc_get_slice_pps_id( const hevc_slice_segment_header_t * );
 
-/* Converts HEVCDecoderConfigurationRecord to Annex B format */
-uint8_t * hevc_hvcC_to_AnnexB_NAL( const uint8_t *p_buf, size_t i_buf,
-                                   size_t *pi_res, uint8_t *pi_nal_length_size );
-
-bool hevc_get_xps_id(const uint8_t *p_buf, size_t i_buf, uint8_t *pi_id);
+bool hevc_get_xps_id(const uint8_t *p_nalbuf, size_t i_nalbuf, uint8_t *pi_id);
 bool hevc_get_sps_profile_tier_level( const hevc_sequence_parameter_set_t *,
                                       uint8_t *pi_profile, uint8_t *pi_level );
 bool hevc_get_picture_size( const hevc_sequence_parameter_set_t *, unsigned *p_w, unsigned *p_h,
                             unsigned *p_vw, unsigned *p_vh );
 bool hevc_get_frame_rate( const hevc_sequence_parameter_set_t *,
-                          hevc_video_parameter_set_t ** /* HEVC_MAX_VPS || NULL */,
+                          const hevc_video_parameter_set_t * /* can be NULL */,
                           unsigned *pi_num, unsigned *pi_den );
+bool hevc_get_aspect_ratio( const hevc_sequence_parameter_set_t *,
+                            unsigned *pi_num, unsigned *pi_den );
+bool hevc_get_chroma_luma( const hevc_sequence_parameter_set_t *, uint8_t *pi_chroma_format,
+                           uint8_t *pi_depth_luma, uint8_t *pi_depth_chroma );
 bool hevc_get_colorimetry( const hevc_sequence_parameter_set_t *p_sps,
                            video_color_primaries_t *p_primaries,
                            video_transfer_func_t *p_transfer,
                            video_color_space_t *p_colorspace,
                            bool *p_full_range );
+uint8_t hevc_get_max_num_reorder( const hevc_video_parameter_set_t *p_vps );
 bool hevc_get_slice_type( const hevc_slice_segment_header_t *, enum hevc_slice_type_e * );
 
 /* Get level and Profile from DecoderConfigurationRecord */
 bool hevc_get_profile_level(const es_format_t *p_fmt, uint8_t *pi_profile,
                             uint8_t *pi_level, uint8_t *pi_nal_length_size);
 
+/*
+ * HEVCDecoderConfigurationRecord related
+ */
+struct hevc_dcr_values
+{
+    uint8_t general_configuration[12];
+    uint8_t i_numTemporalLayer;
+    uint8_t i_chroma_idc;
+    uint8_t i_bit_depth_luma_minus8;
+    uint8_t i_bit_depth_chroma_minus8;
+    bool b_temporalIdNested;
+};
+
+#define HEVC_DCR_VPS_COUNT (HEVC_VPS_ID_MAX + 1)
+#define HEVC_DCR_SPS_COUNT (HEVC_SPS_ID_MAX + 1)
+#define HEVC_DCR_PPS_COUNT (HEVC_PPS_ID_MAX + 1)
+#define HEVC_DCR_SEI_COUNT (16)
+
+struct hevc_dcr_params
+{
+    const uint8_t *p_vps[HEVC_DCR_VPS_COUNT],
+                  *p_sps[HEVC_DCR_SPS_COUNT],
+                  *p_pps[HEVC_DCR_VPS_COUNT],
+                  *p_seipref[HEVC_DCR_SEI_COUNT],
+                  *p_seisuff[HEVC_DCR_SEI_COUNT];
+    uint8_t rgi_vps[HEVC_DCR_VPS_COUNT],
+            rgi_sps[HEVC_DCR_SPS_COUNT],
+            rgi_pps[HEVC_DCR_PPS_COUNT],
+            rgi_seipref[HEVC_DCR_SEI_COUNT],
+            rgi_seisuff[HEVC_DCR_SEI_COUNT];
+    uint8_t i_vps_count, i_sps_count, i_pps_count;
+    uint8_t i_seipref_count, i_seisuff_count;
+    struct hevc_dcr_values *p_values;
+};
+
+uint8_t * hevc_create_dcr( const struct hevc_dcr_params *p_params,
+                           uint8_t i_nal_length_size,
+                           bool b_completeness, size_t *pi_size );
+
+/* Converts HEVCDecoderConfigurationRecord to Annex B format */
+uint8_t * hevc_hvcC_to_AnnexB_NAL( const uint8_t *p_buf, size_t i_buf,
+                                   size_t *pi_res, uint8_t *pi_nal_length_size );
+
+/*
+ * POC computing
+ */
 typedef struct
 {
     struct
     {
         int lsb;
         int msb;
-    } prevPicOrderCnt, prevTid0PicOrderCnt;
+    } prevTid0PicOrderCnt;
 
+    bool HandleCraAsBlaFlag;
     bool first_picture; /* Must be set on start or on NAL_EOS */
 } hevc_poc_ctx_t;
+
+static inline void hevc_poc_cxt_init( hevc_poc_ctx_t *p_ctx )
+{
+    p_ctx->prevTid0PicOrderCnt.lsb = 0;
+    p_ctx->prevTid0PicOrderCnt.msb = 0;
+    p_ctx->first_picture = true;
+}
 
 int hevc_compute_picture_order_count( const hevc_sequence_parameter_set_t *p_sps,
                                        const hevc_slice_segment_header_t *slice,
@@ -221,5 +276,7 @@ void hevc_release_sei_pic_timing( hevc_sei_pic_timing_t * );
 
 uint8_t hevc_get_num_clock_ts( const hevc_sequence_parameter_set_t *,
                                const hevc_sei_pic_timing_t * /* can be NULL */ );
+bool hevc_frame_is_progressive( const hevc_sequence_parameter_set_t *,
+                                const hevc_sei_pic_timing_t * /* can be NULL */);
 
 #endif /* HEVC_NAL_H */

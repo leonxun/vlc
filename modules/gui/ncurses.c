@@ -796,7 +796,6 @@ static int DrawStats(intf_thread_t *intf, input_thread_t *p_input)
 
     vlc_mutex_lock(&item->lock);
     p_stats = item->p_stats;
-    vlc_mutex_lock(&p_stats->lock);
 
     for (int i = 0; i < item->i_es ; i++) {
         i_audio += (item->es[i]->i_cat == AUDIO_ES);
@@ -840,18 +839,8 @@ static int DrawStats(intf_thread_t *intf, input_thread_t *p_input)
         MainBoxWrite(sys, l++, _("| buffers lost     :    %5"PRIi64),
                 p_stats->i_lost_abuffers);
     }
-    /* Sout */
-    if (sys->color) color_set(C_CATEGORY, NULL);
-    MainBoxWrite(sys, l++, _("+-[Streaming]"));
-    if (sys->color) color_set(C_DEFAULT, NULL);
-    MainBoxWrite(sys, l++, _("| packets sent     :    %5"PRIi64), p_stats->i_sent_packets);
-    MainBoxWrite(sys, l++, _("| bytes sent       : %8.0f KiB"),
-            (float)(p_stats->i_sent_bytes)/1025);
-    MainBoxWrite(sys, l++, _("| sending bitrate  :   %6.0f kb/s"),
-            p_stats->f_send_bitrate*8000);
     if (sys->color) color_set(C_DEFAULT, NULL);
 
-    vlc_mutex_unlock(&p_stats->lock);
     vlc_mutex_unlock(&item->lock);
 
     return l;
@@ -975,15 +964,15 @@ static int DrawPlaylist(intf_thread_t *intf, input_thread_t *input)
     for (int i = 0; i < sys->plist_entries; i++) {
         char c;
         playlist_item_t *current;
-        input_item_t *input = sys->plist[i]->item;
+        input_item_t *item = sys->plist[i]->item;
 
         PL_LOCK;
         current = playlist_CurrentPlayingItem(p_playlist);
 
-        if ((sys->node != NULL && input == sys->node) ||
-            (sys->node == NULL && current != NULL && input == current->p_input))
+        if ((sys->node != NULL && item == sys->node) ||
+            (sys->node == NULL && current != NULL && item == current->p_input))
             c = '*';
-        else if (current != NULL && current->p_input == input)
+        else if (current != NULL && current->p_input == item)
             c = '>';
         else
             c = ' ';
@@ -1052,8 +1041,8 @@ static int DrawStatus(intf_thread_t *intf, input_thread_t *p_input)
 
     y++; /* leave a blank line */
 
-    repeat = var_GetBool(p_playlist, "repeat") ? _("[Repeat] ") : "";
-    random = var_GetBool(p_playlist, "random") ? _("[Random] ") : "";
+    repeat = var_GetBool(p_playlist, "repeat") ? _("[Repeat]") : "";
+    random = var_GetBool(p_playlist, "random") ? _("[Random]") : "";
     loop   = var_GetBool(p_playlist, "loop")   ? _("[Loop]")    : "";
 
     if (p_input) {
@@ -1219,7 +1208,7 @@ static inline void RemoveLastUTF8Entity(char *psz, int len)
     psz[len] = '\0';
 }
 
-static char *GetDiscDevice(intf_thread_t *intf, const char *name)
+static char *GetDiscDevice(const char *name)
 {
     static const struct { const char *s; size_t n; const char *v; } devs[] =
     {
@@ -1233,7 +1222,7 @@ static char *GetDiscDevice(intf_thread_t *intf, const char *name)
         size_t n = devs[i].n;
         if (!strncmp(name, devs[i].s, n)) {
             if (name[n] == '@' || name[n] == '\0')
-                return config_GetPsz(intf, devs[i].v);
+                return config_GetPsz(devs[i].v);
             /* Omit the beginning MRL-selector characters */
             return strdup(name + n);
         }
@@ -1264,7 +1253,7 @@ static void Eject(intf_thread_t *intf, input_thread_t *p_input)
     }
 
     name = playlist_CurrentPlayingItem(p_playlist)->p_input->psz_name;
-    device = name ? GetDiscDevice(intf, name) : NULL;
+    device = name ? GetDiscDevice(name) : NULL;
 
     PL_UNLOCK;
 

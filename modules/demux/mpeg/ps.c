@@ -110,6 +110,10 @@ struct demux_sys_t
         CDXA_PS,
         PSMF_PS,
     } format;
+
+    int         current_title;
+    int         current_seekpoint;
+    unsigned    updates;
 };
 
 static int Demux  ( demux_t *p_demux );
@@ -223,6 +227,9 @@ static int OpenCommon( vlc_object_t *p_this, bool b_force )
     p_sys->b_bad_scr   = false;
     p_sys->b_seekable  = false;
     p_sys->format      = format;
+    p_sys->current_title = 0;
+    p_sys->current_seekpoint = 0;
+    p_sys->updates = 0;
 
     vlc_stream_Control( p_demux->s, STREAM_CAN_SEEK, &p_sys->b_seekable );
 
@@ -299,7 +306,7 @@ static int Probe( demux_t *p_demux, bool b_end )
     i_id = ps_pkt_id( p_pkt );
     if( i_id >= 0xc0 )
     {
-        ps_track_t *tk = &p_sys->tk[PS_ID_TO_TK(i_id)];
+        ps_track_t *tk = &p_sys->tk[ps_id_to_tk(i_id)];
         if( !ps_pkt_parse_pes( VLC_OBJECT(p_demux), p_pkt, tk->i_skip ) &&
              p_pkt->i_pts > VLC_TS_INVALID )
         {
@@ -455,7 +462,7 @@ static int Demux( demux_t *p_demux )
             p_sys->i_lastpack_byte = vlc_stream_Tell( p_demux->s );
             if( !p_sys->b_have_pack ) p_sys->b_have_pack = true;
             /* done later on to work around bad vcd/svcd streams */
-            /* es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_sys->i_scr ); */
+            /* es_out_SetPCR( p_demux->out, p_sys->i_scr ); */
             if( i_mux_rate > 0 ) p_sys->i_mux_rate = i_mux_rate;
         }
         block_Release( p_pkt );
@@ -496,7 +503,7 @@ static int Demux( demux_t *p_demux )
             block_Release( p_pkt );
             break;
         }
-        //ft
+        /* fallthrough */
     case PS_STREAM_ID_PRIVATE_STREAM1:
     case PS_STREAM_ID_EXTENDED:
         {
@@ -515,7 +522,7 @@ static int Demux( demux_t *p_demux )
             }
 
             bool b_new = false;
-            ps_track_t *tk = &p_sys->tk[PS_ID_TO_TK(i_id)];
+            ps_track_t *tk = &p_sys->tk[ps_id_to_tk(i_id)];
 
             if( !tk->b_configured )
             {
@@ -529,8 +536,7 @@ static int Demux( demux_t *p_demux )
 #if 0
                         if( i_stream_id == PS_STREAM_ID_PRIVATE_STREAM1 )
                         {
-                            tk->fmt.i_codec = VLC_CODEC_ATRAC3P;
-                            tk->fmt.i_cat = AUDIO_ES;
+                            es_format_Change( &tk->fmt, AUDIO_ES, VLC_CODEC_ATRAC3P );
                             tk->fmt.audio.i_blockalign = 376;
                             tk->fmt.audio.i_channels = 2;
                             tk->fmt.audio.i_rate = 44100;
@@ -567,15 +573,15 @@ static int Demux( demux_t *p_demux )
             if( p_sys->i_pack_scr >= 0 && !p_sys->b_bad_scr )
             {
                 if( (tk->fmt.i_cat == AUDIO_ES || tk->fmt.i_cat == VIDEO_ES) &&
-                    tk->i_first_pts > VLC_TS_INVALID && tk->i_first_pts - p_sys->i_pack_scr > CLOCK_FREQ )
+                    tk->i_first_pts > VLC_TS_INVALID && tk->i_first_pts - p_sys->i_pack_scr > 2 * CLOCK_FREQ )
                 {
-                    msg_Warn( p_demux, "Incorrect SCR timing offset by of %ld ms, disabling",
+                    msg_Warn( p_demux, "Incorrect SCR timing offset by of %"PRId64 "ms, disabling",
                                        tk->i_first_pts - p_sys->i_pack_scr / 1000 );
                     p_sys->b_bad_scr = true; /* Disable Offset SCR */
                     p_sys->i_first_scr = -1;
                 }
                 else
-                    es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pack_scr );
+                    es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_pack_scr );
             }
 
             if( tk->b_configured && tk->es &&
@@ -586,7 +592,7 @@ static int Demux( demux_t *p_demux )
                     if( !p_sys->b_bad_scr && p_sys->i_pack_scr > 0 && p_pkt->i_pts > 0 &&
                         p_sys->i_pack_scr > p_pkt->i_pts + CLOCK_FREQ / 4 )
                     {
-                        msg_Warn( p_demux, "Incorrect SCR timing in advance of %ld ms, disabling",
+                        msg_Warn( p_demux, "Incorrect SCR timing in advance of %" PRId64 "ms, disabling",
                                            p_sys->i_pack_scr - p_pkt->i_pts / 1000 );
                         p_sys->b_bad_scr = true;
                         p_sys->i_first_scr = -1;
@@ -607,7 +613,7 @@ static int Demux( demux_t *p_demux )
                     p_sys->i_scr = p_pkt->i_pts;
                     if( p_sys->i_first_scr == -1 )
                         p_sys->i_first_scr = p_sys->i_scr;
-                    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_pkt->i_pts );
+                    es_out_SetPCR( p_demux->out, p_pkt->i_pts );
                 }
 
                 if( tk->fmt.i_codec == VLC_CODEC_TELETEXT &&
@@ -665,6 +671,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
     {
         case DEMUX_CAN_SEEK:
             *va_arg( args, bool * ) = p_sys->b_seekable;
+            return VLC_SUCCESS;
+
+        case DEMUX_GET_TITLE:
+            *va_arg( args, int * ) = p_sys->current_title;
+            return VLC_SUCCESS;
+
+        case DEMUX_GET_SEEKPOINT:
+            *va_arg( args, int * ) = p_sys->current_seekpoint;
             return VLC_SUCCESS;
 
         case DEMUX_GET_POSITION:
@@ -769,12 +783,29 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return vlc_stream_vaControl( p_demux->s, STREAM_SET_SEEKPOINT,
                                          args );
 
+        case DEMUX_TEST_AND_CLEAR_FLAGS:
+        {
+            unsigned *restrict flags = va_arg(args, unsigned *);
+            *flags &= p_sys->updates;
+            p_sys->updates &= ~*flags;
+            return VLC_SUCCESS;
+        }
+
         case DEMUX_GET_META:
             return vlc_stream_vaControl( p_demux->s, STREAM_GET_META, args );
 
         case DEMUX_GET_FPS:
+            break;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
+
         default:
             break;
+
     }
     return VLC_EGENERIC;
 }

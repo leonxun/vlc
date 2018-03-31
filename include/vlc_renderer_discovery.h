@@ -27,6 +27,7 @@
 
 /**
  * @defgroup vlc_renderer VLC renderer discovery
+ * @ingroup interface
  * @{
  *
  * @file
@@ -163,7 +164,7 @@ struct vlc_renderer_discovery_owner
 
 struct vlc_renderer_discovery_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
     module_t *          p_module;
 
     struct vlc_renderer_discovery_owner owner;

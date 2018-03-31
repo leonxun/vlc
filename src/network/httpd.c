@@ -72,7 +72,7 @@ static void httpd_AppendData(httpd_stream_t *stream, uint8_t *p_data, int i_data
 /* each host run in his own thread */
 struct httpd_host_t
 {
-    VLC_COMMON_MEMBERS
+    struct vlc_common_members obj;
 
     /* ref count */
     unsigned    i_ref;
@@ -133,13 +133,6 @@ enum
 
     HTTPD_CLIENT_TLS_HS_IN,
     HTTPD_CLIENT_TLS_HS_OUT
-};
-
-/* mode */
-enum
-{
-    HTTPD_CLIENT_FILE,      /* default */
-    HTTPD_CLIENT_STREAM,    /* regulary get data from cb */
 };
 
 struct httpd_client_t
@@ -310,7 +303,7 @@ httpd_FileCallBack(httpd_callback_sys_t *p_sys, httpd_client_t *cl,
                     httpd_message_t *answer, const httpd_message_t *query)
 {
     httpd_file_t *file = (httpd_file_t*)p_sys;
-    uint8_t **pp_body, *p_body; const char *psz_connection;
+    uint8_t **pp_body, *p_body;
     int *pi_body, i_body;
 
     if (!answer || !query )
@@ -347,9 +340,8 @@ httpd_FileCallBack(httpd_callback_sys_t *p_sys, httpd_client_t *cl,
         free(p_body);
 
     /* We respect client request */
-    psz_connection = httpd_MsgGet(&cl->query, "Connection");
-    if (psz_connection)
-        httpd_MsgAdd(answer, "Connection", "%s", psz_connection);
+    if (httpd_MsgGet(&cl->query, "Connection") != NULL)
+        httpd_MsgAdd(answer, "Connection", "close");
 
     httpd_MsgAdd(answer, "Content-Length", "%d", answer->i_body);
 
@@ -552,6 +544,9 @@ static int httpd_RedirectCallBack(httpd_callback_sys_t *p_sys,
 
     httpd_MsgAdd(answer, "Content-Length", "%d", answer->i_body);
 
+    if (httpd_MsgGet(&cl->query, "Connection") != NULL)
+        httpd_MsgAdd(answer, "Connection", "close");
+
     return VLC_SUCCESS;
 }
 
@@ -740,6 +735,9 @@ static int httpd_StreamCallBack(httpd_callback_sys_t *p_sys,
 
         if (!b_has_cache_control)
             httpd_MsgAdd(answer, "Cache-Control", "no-cache");
+
+        httpd_MsgAdd(answer, "Connection", "close");
+
         return VLC_SUCCESS;
     }
 }
@@ -1510,7 +1508,7 @@ static void httpd_ClientRecv(httpd_client_t *cl)
                 /* TODO Mhh, handle the case where the client only
                  * sends a request and closes the connection to
                  * mark the end of the body (probably only RTSP) */
-                if (cl->query.i_body >= 65536)
+                if (cl->query.i_body < 65536)
                     cl->query.p_body = malloc(cl->query.i_body);
                 else
                     cl->query.p_body = NULL;
@@ -1790,6 +1788,9 @@ static void httpdLoop(httpd_host_t *host)
                             break;
                         }
 
+                        if (httpd_MsgGet(&cl->query, "Connection") != NULL)
+                            httpd_MsgAdd(answer, "Connection", "close");
+
                         cl->i_buffer = -1;  /* Force the creation of the answer in
                                              * httpd_ClientSend */
                         cl->i_state = HTTPD_CLIENT_SENDING;
@@ -1810,6 +1811,7 @@ static void httpdLoop(httpd_host_t *host)
                             answer->i_body = httpd_HtmlError (&p, 501, NULL);
                             answer->p_body = (uint8_t *)p;
                             httpd_MsgAdd(answer, "Content-Length", "%d", answer->i_body);
+                            httpd_MsgAdd(answer, "Connection", "close");
 
                             cl->i_buffer = -1;  /* Force the creation of the answer in httpd_ClientSend */
                             cl->i_state = HTTPD_CLIENT_SENDING;
@@ -1871,6 +1873,8 @@ static void httpdLoop(httpd_host_t *host)
                             cl->i_buffer = -1;  /* Force the creation of the answer in httpd_ClientSend */
                             httpd_MsgAdd(answer, "Content-Length", "%d", answer->i_body);
                             httpd_MsgAdd(answer, "Content-Type", "%s", "text/html");
+                            if (httpd_MsgGet(&cl->query, "Connection") != NULL)
+                                httpd_MsgAdd(answer, "Connection", "close");
                         }
 
                         cl->i_state = HTTPD_CLIENT_SENDING;
@@ -1881,26 +1885,22 @@ static void httpdLoop(httpd_host_t *host)
 
             case HTTPD_CLIENT_SEND_DONE:
                 if (!cl->b_stream_mode || cl->answer.i_body_offset == 0) {
-                    const char *psz_connection = httpd_MsgGet(&cl->answer, "Connection");
-                    const char *psz_query = httpd_MsgGet(&cl->query, "Connection");
-                    bool b_connection = false;
-                    bool b_keepalive = false;
-                    bool b_query = false;
+                    bool do_close = false;
 
                     cl->url = NULL;
-                    if (psz_connection) {
-                        b_connection = (strcasecmp(psz_connection, "Close") == 0);
-                        b_keepalive = (strcasecmp(psz_connection, "Keep-Alive") == 0);
+
+                    if (cl->query.i_proto != HTTPD_PROTO_HTTP
+                     || cl->query.i_version > 0)
+                    {
+                        const char *psz_connection = httpd_MsgGet(&cl->answer,
+                                                                 "Connection");
+                        if (psz_connection != NULL)
+                            do_close = !strcasecmp(psz_connection, "close");
                     }
+                    else
+                        do_close = true;
 
-                    if (psz_query)
-                        b_query = (strcasecmp(psz_query, "Close") == 0);
-
-                    if (((cl->query.i_proto == HTTPD_PROTO_HTTP) &&
-                                ((cl->query.i_version == 0 && b_keepalive) ||
-                                  (cl->query.i_version == 1 && !b_connection))) ||
-                            ((cl->query.i_proto == HTTPD_PROTO_RTSP) &&
-                              !b_query && !b_connection)) {
+                    if (!do_close) {
                         httpd_MsgClean(&cl->query);
                         httpd_MsgInit(&cl->query);
 
@@ -1955,21 +1955,14 @@ static void httpdLoop(httpd_host_t *host)
     vlc_restorecancel(canc);
 
     /* we will wait 20ms (not too big) if HTTPD_CLIENT_WAITING */
-    int ret = poll(ufd, nfd, b_low_delay ? 20 : -1);
+    while (poll(ufd, nfd, b_low_delay ? 20 : -1) < 0)
+    {
+        if (errno != EINTR)
+            msg_Err(host, "polling error: %s", vlc_strerror_c(errno));
+    }
 
     canc = vlc_savecancel();
     vlc_mutex_lock(&host->lock);
-    switch(ret) {
-        case -1:
-            if (errno != EINTR) {
-                /* Kernel on low memory or a bug: pace */
-                msg_Err(host, "polling error: %s", vlc_strerror_c(errno));
-                msleep(100000);
-            }
-        case 0:
-            vlc_restorecancel(canc);
-            return;
-    }
 
     /* Handle client sockets */
     now = mdate();
@@ -2059,7 +2052,8 @@ static void* httpd_HostThread(void *data)
     return NULL;
 }
 
-int httpd_StreamSetHTTPHeaders(httpd_stream_t * p_stream, httpd_header * p_headers, size_t i_headers)
+int httpd_StreamSetHTTPHeaders(httpd_stream_t * p_stream,
+                               const httpd_header *p_headers, size_t i_headers)
 {
     if (!p_stream)
         return VLC_EGENERIC;
@@ -2080,7 +2074,7 @@ int httpd_StreamSetHTTPHeaders(httpd_stream_t * p_stream, httpd_header * p_heade
         return VLC_SUCCESS;
     }
 
-    p_stream->p_http_headers = malloc(sizeof(httpd_header) * i_headers);
+    p_stream->p_http_headers = vlc_alloc(i_headers, sizeof(httpd_header));
     if (!p_stream->p_http_headers) {
         vlc_mutex_unlock(&p_stream->lock);
         return VLC_ENOMEM;

@@ -69,6 +69,9 @@ struct demux_sys_t
     int block_size;
     es_out_id_t *es;
     date_t pts;
+
+    int last_title;
+    bool title_changed;
 };
 
 
@@ -191,7 +194,7 @@ error:
 static void Close (vlc_object_t *obj)
 {
     demux_t *demux = (demux_t *)obj;
-    demux_sys_t *sys = demux->p_sys;
+    demux_sys_t *sys = (demux_sys_t *)demux->p_sys;
 
     delete sys->player;
     delete sys->config.sidEmulation;
@@ -201,7 +204,7 @@ static void Close (vlc_object_t *obj)
 
 static int Demux (demux_t *demux)
 {
-    demux_sys_t *sys = demux->p_sys;
+    demux_sys_t *sys = (demux_sys_t *)demux->p_sys;
 
     block_t *block = block_Alloc( sys->block_size);
     if (unlikely(block==NULL))
@@ -220,7 +223,7 @@ static int Demux (demux_t *demux)
     block->i_buffer = i_read;
     block->i_pts = block->i_dts = VLC_TS_0 + date_Get (&sys->pts);
 
-    es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts);
+    es_out_SetPCR (demux->out, block->i_pts);
 
     es_out_Send (demux->out, sys->es, block);
 
@@ -232,7 +235,7 @@ static int Demux (demux_t *demux)
 
 static int Control (demux_t *demux, int query, va_list args)
 {
-    demux_sys_t *sys = demux->p_sys;
+    demux_sys_t *sys = (demux_sys_t *)demux->p_sys;
 
     switch (query)
     {
@@ -259,7 +262,7 @@ static int Control (demux_t *demux, int query, va_list args)
                 int *pi_int = va_arg( args, int* );
 
                 *pi_int = sys->tuneInfo.songs;
-                *ppp_title = (input_title_t**) malloc( sizeof (input_title_t*) * sys->tuneInfo.songs);
+                *ppp_title = (input_title_t**) vlc_alloc( sys->tuneInfo.songs, sizeof (input_title_t*));
 
                 for( int i = 0; i < sys->tuneInfo.songs; i++ ) {
                     (*ppp_title)[i] = vlc_input_title_New();
@@ -276,12 +279,34 @@ static int Control (demux_t *demux, int query, va_list args)
             if (!result)
                 return  VLC_EGENERIC;
 
-            demux->info.i_title = i_idx;
-            demux->info.i_update = INPUT_UPDATE_TITLE;
+            sys->last_title = i_idx;
+            sys->title_changed = true;
             msg_Dbg( demux, "set song %i", i_idx);
 
             return VLC_SUCCESS;
         }
+
+        case DEMUX_TEST_AND_CLEAR_FLAGS: {
+            unsigned *restrict flags = va_arg(args, unsigned *);
+
+            if ((*flags & INPUT_UPDATE_TITLE) && sys->title_changed) {
+                *flags = INPUT_UPDATE_TITLE;
+                sys->title_changed = false;
+            } else
+                *flags = 0;
+            return VLC_SUCCESS;
+        }
+
+        case DEMUX_GET_TITLE:
+            *va_arg(args, int *) = sys->last_title;
+            return VLC_SUCCESS;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( demux->s, 0, -1, 0,
+                                          sys->bytes_per_frame, query, args );
     }
 
     return VLC_EGENERIC;

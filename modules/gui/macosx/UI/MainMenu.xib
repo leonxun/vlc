@@ -1,9 +1,8 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="10117" systemVersion="15G1421" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES">
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="com.apple.InterfaceBuilder3.Cocoa.XIB" version="3.0" toolsVersion="12121" systemVersion="17E139j" targetRuntime="MacOSX.Cocoa" propertyAccessControl="none" useAutolayout="YES">
     <dependencies>
-        <deployment identifier="macosx"/>
         <development version="7000" identifier="xcode"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="10117"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.CocoaPlugin" version="12121"/>
     </dependencies>
     <objects>
         <customObject id="-2" userLabel="File's Owner" customClass="VLCMainMenu">
@@ -106,7 +105,9 @@
                 <outlet property="rate_slowerLabel" destination="4600" id="vRN-S8-MSb"/>
                 <outlet property="rate_view" destination="4596" id="MPC-hG-6bj"/>
                 <outlet property="record" destination="5137" id="Ka3-jl-auY"/>
-                <outlet property="renderer" destination="Rf6-Uj-7Ja" id="Nzc-Qb-SnK"/>
+                <outlet property="rendererMenu" destination="ODg-VN-8Tv" id="3Ox-BO-HyW"/>
+                <outlet property="rendererMenuItem" destination="wYl-A2-q30" id="obH-UF-FmA"/>
+                <outlet property="rendererNoneItem" destination="eE8-qf-9x9" id="Ol2-yz-0eF"/>
                 <outlet property="repeat" destination="5143" id="ulG-wD-gtG"/>
                 <outlet property="revealInFinder" destination="3945" id="z7n-A2-K5o"/>
                 <outlet property="save_playlist" destination="1599" id="spC-pk-6W4"/>
@@ -484,11 +485,18 @@
                             <menuItem isSeparatorItem="YES" id="5154">
                                 <modifierMask key="keyEquivalentModifierMask" command="YES"/>
                             </menuItem>
-                            <menuItem title="Select Renderer…" id="Rf6-Uj-7Ja">
+                            <menuItem title="Renderer" id="wYl-A2-q30">
                                 <modifierMask key="keyEquivalentModifierMask"/>
-                                <connections>
-                                    <action selector="showRenderers:" target="-2" id="Y9L-YQ-3RJ"/>
-                                </connections>
+                                <menu key="submenu" title="Renderer" id="ODg-VN-8Tv">
+                                    <items>
+                                        <menuItem title="No Renderer" state="on" id="eE8-qf-9x9">
+                                            <modifierMask key="keyEquivalentModifierMask"/>
+                                            <connections>
+                                                <action selector="selectRenderer:" target="-2" id="80x-Dh-S0n"/>
+                                            </connections>
+                                        </menuItem>
+                                    </items>
+                                </menu>
                             </menuItem>
                             <menuItem title="Program" id="5150">
                                 <menu key="submenu" title="Program" id="5157"/>
@@ -944,10 +952,7 @@
             <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
             <subviews>
                 <slider verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="4597">
-                    <rect key="frame" x="28" y="3" width="261" height="16"/>
-                    <constraints>
-                        <constraint firstAttribute="width" constant="261" id="mPU-3b-J9E"/>
-                    </constraints>
+                    <rect key="frame" x="28" y="4" width="261" height="15"/>
                     <sliderCell key="cell" controlSize="mini" continuous="YES" enabled="NO" state="on" alignment="left" minValue="-34" maxValue="34" tickMarkPosition="above" numberOfTickMarks="17" sliderType="linear" id="4605"/>
                     <connections>
                         <action selector="setPlaybackRate:" target="-2" id="hdX-mB-WKd"/>
@@ -1001,31 +1006,34 @@
                 </textField>
             </subviews>
             <constraints>
-                <constraint firstItem="4615" firstAttribute="leading" secondItem="4597" secondAttribute="leading" constant="-7" id="3bT-I0-wWf"/>
+                <constraint firstAttribute="trailing" secondItem="4597" secondAttribute="trailing" constant="18" id="0mI-WU-Hft"/>
                 <constraint firstItem="4597" firstAttribute="leading" secondItem="4596" secondAttribute="leading" constant="28" id="3eU-xF-bKw"/>
                 <constraint firstItem="4600" firstAttribute="centerY" secondItem="4598" secondAttribute="centerY" id="5aF-Lp-phm"/>
                 <constraint firstItem="4597" firstAttribute="top" secondItem="4601" secondAttribute="bottom" constant="-8" id="5k1-Co-uGX"/>
                 <constraint firstItem="4615" firstAttribute="top" secondItem="4596" secondAttribute="top" id="7KB-Mh-tpE"/>
                 <constraint firstItem="4597" firstAttribute="top" secondItem="4615" secondAttribute="bottom" constant="16" id="8kk-M5-VKI"/>
                 <constraint firstItem="4617" firstAttribute="centerY" secondItem="4615" secondAttribute="centerY" id="Qtz-HV-35I"/>
+                <constraint firstItem="4615" firstAttribute="leading" secondItem="4596" secondAttribute="leading" constant="21" id="Zdw-tm-Z6L"/>
                 <constraint firstItem="4600" firstAttribute="centerY" secondItem="4599" secondAttribute="centerY" id="acy-Wj-eHh"/>
+                <constraint firstItem="4617" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="4615" secondAttribute="trailing" constant="10" id="adv-PY-Nfr"/>
                 <constraint firstItem="4617" firstAttribute="trailing" secondItem="4597" secondAttribute="trailing" id="d6x-PQ-pfq"/>
                 <constraint firstItem="4598" firstAttribute="centerX" secondItem="4597" secondAttribute="centerX" id="dVp-4U-EiF"/>
+                <constraint firstItem="4598" firstAttribute="left" relation="greaterThanOrEqual" secondItem="4600" secondAttribute="right" constant="10" id="fky-PP-mvL"/>
                 <constraint firstItem="4601" firstAttribute="centerX" secondItem="4597" secondAttribute="centerX" id="gAy-Wg-VLj"/>
+                <constraint firstAttribute="bottom" secondItem="4597" secondAttribute="bottom" constant="4" id="h79-fh-FBi"/>
+                <constraint firstItem="4599" firstAttribute="left" relation="greaterThanOrEqual" secondItem="4598" secondAttribute="right" constant="10" id="haf-NR-a54"/>
                 <constraint firstItem="4597" firstAttribute="top" secondItem="4600" secondAttribute="bottom" id="uku-8k-K3D"/>
-                <constraint firstItem="4599" firstAttribute="trailing" secondItem="4597" secondAttribute="trailing" id="wQZ-1a-DAZ"/>
-                <constraint firstItem="4600" firstAttribute="leading" secondItem="4597" secondAttribute="leading" id="zGp-3d-2RP"/>
+                <constraint firstItem="4599" firstAttribute="right" secondItem="4597" secondAttribute="right" id="wQZ-1a-DAZ"/>
+                <constraint firstItem="4600" firstAttribute="left" secondItem="4597" secondAttribute="left" id="zGp-3d-2RP"/>
             </constraints>
+            <point key="canvasLocation" x="288.5" y="149.5"/>
         </customView>
         <customView id="5547" userLabel="Sub BG Opacity">
             <rect key="frame" x="0.0" y="0.0" width="309" height="39"/>
             <autoresizingMask key="autoresizingMask" flexibleMaxX="YES" flexibleMinY="YES"/>
             <subviews>
                 <slider verticalHuggingPriority="750" translatesAutoresizingMaskIntoConstraints="NO" id="5555">
-                    <rect key="frame" x="28" y="1" width="261" height="16"/>
-                    <constraints>
-                        <constraint firstAttribute="width" constant="261" id="Hu0-CJ-jYl"/>
-                    </constraints>
+                    <rect key="frame" x="28" y="2" width="261" height="15"/>
                     <sliderCell key="cell" controlSize="mini" continuous="YES" enabled="NO" state="on" alignment="left" maxValue="255" tickMarkPosition="above" numberOfTickMarks="17" sliderType="linear" id="5556"/>
                     <connections>
                         <action selector="switchSubtitleBackgroundOpacity:" target="-2" id="mIi-V5-gqn"/>
@@ -1054,11 +1062,15 @@
                 <constraint firstItem="5550" firstAttribute="width" secondItem="5548" secondAttribute="width" id="5Y0-GK-4Jr"/>
                 <constraint firstItem="5550" firstAttribute="top" secondItem="5547" secondAttribute="top" constant="1" id="A0A-U4-c70"/>
                 <constraint firstItem="5550" firstAttribute="height" secondItem="5548" secondAttribute="height" id="ARP-iB-hpr"/>
+                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="5550" secondAttribute="trailing" constant="17" id="AjR-Ja-Kwu"/>
+                <constraint firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="5548" secondAttribute="trailing" constant="17" id="QDr-TS-Anv"/>
+                <constraint firstAttribute="trailing" secondItem="5555" secondAttribute="trailing" constant="20" id="WG2-ZC-N9x"/>
                 <constraint firstItem="5548" firstAttribute="centerX" secondItem="5550" secondAttribute="centerX" id="ZTn-Vv-gdG"/>
                 <constraint firstItem="5555" firstAttribute="leading" secondItem="5547" secondAttribute="leading" constant="28" id="abd-YT-hbw"/>
+                <constraint firstAttribute="bottom" secondItem="5555" secondAttribute="bottom" constant="2" id="fI1-6z-VzI"/>
                 <constraint firstItem="5548" firstAttribute="centerY" secondItem="5550" secondAttribute="centerY" id="jed-zg-Ueg"/>
             </constraints>
-            <point key="canvasLocation" x="479.5" y="564.5"/>
+            <point key="canvasLocation" x="296.5" y="285.5"/>
         </customView>
         <userDefaultsController representsSharedInstance="YES" id="uFO-sP-uo6"/>
     </objects>

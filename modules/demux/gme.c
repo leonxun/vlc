@@ -59,6 +59,7 @@ struct demux_sys_t
 
     input_title_t **titlev;
     unsigned        titlec;
+    bool            title_changed;
 };
 
 
@@ -70,8 +71,10 @@ static gme_err_t ReaderBlock (void *, void *, int);
 static int Open (vlc_object_t *obj)
 {
     demux_t *demux = (demux_t *)obj;
+    uint64_t size;
 
-    int64_t size = stream_Size (demux->s);
+    if (vlc_stream_GetSize(demux->s, &size))
+        return VLC_EGENERIC;
     if (size > LONG_MAX /* too big for GME */)
         return VLC_EGENERIC;
 
@@ -131,7 +134,7 @@ static int Open (vlc_object_t *obj)
 
     /* Titles */
     unsigned n = gme_track_count (sys->emu);
-    sys->titlev = malloc (n * sizeof (*sys->titlev));
+    sys->titlev = vlc_alloc (n, sizeof (*sys->titlev));
     if (unlikely(sys->titlev == NULL))
         n = 0;
     sys->titlec = n;
@@ -152,6 +155,7 @@ static int Open (vlc_object_t *obj)
              title->psz_name = strdup (infos->song);
          gme_free_info (infos);
     }
+    sys->title_changed = false;
 
     /* Callbacks */
     demux->pf_demux = Demux;
@@ -208,8 +212,7 @@ static int Demux (demux_t *demux)
         if (++sys->track_id >= (unsigned)gme_track_count (sys->emu))
             return 0;
 
-        demux->info.i_update |= INPUT_UPDATE_TITLE;
-        demux->info.i_title = sys->track_id;
+        sys->title_changed = true;
         gme_start_track (sys->emu, sys->track_id);
     }
 
@@ -227,7 +230,7 @@ static int Demux (demux_t *demux)
     }
 
     block->i_pts = block->i_dts = VLC_TS_0 + date_Get (&sys->pts);
-    es_out_Control (demux->out, ES_OUT_SET_PCR, block->i_pts);
+    es_out_SetPCR (demux->out, block->i_pts);
     es_out_Send (demux->out, sys->es, block);
     date_Increment (&sys->pts, SAMPLES);
     return 1;
@@ -309,7 +312,7 @@ static int Control (demux_t *demux, int query, va_list args)
             *(va_arg (args, int *)) = 0; /* Chapter offset */
 
             unsigned n = sys->titlec;
-            *titlev = malloc (sizeof (**titlev) * n);
+            *titlev = vlc_alloc (n, sizeof (**titlev));
             if (unlikely(*titlev == NULL))
                 n = 0;
             *titlec = n;
@@ -324,11 +327,35 @@ static int Control (demux_t *demux, int query, va_list args)
             if (track_id >= gme_track_count (sys->emu))
                 break;
             gme_start_track (sys->emu, track_id);
-            demux->info.i_update |= INPUT_UPDATE_TITLE;
-            demux->info.i_title = track_id;
+            sys->title_changed = true;
             sys->track_id = track_id;
             return VLC_SUCCESS;
         }
+
+        case DEMUX_TEST_AND_CLEAR_FLAGS:
+        {
+            unsigned *restrict flags = va_arg(args, unsigned *);
+
+            if ((*flags & INPUT_UPDATE_TITLE) && sys->title_changed) {
+                *flags = INPUT_UPDATE_TITLE;
+                sys->title_changed = false;
+            } else
+                *flags = 0;
+            return VLC_SUCCESS;
+        }
+
+        case DEMUX_GET_TITLE:
+            *va_arg(args, int *) = sys->track_id;
+            return VLC_SUCCESS;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( demux->s, 0, -1, 0, 1, query, args );
+
+        default:
+            return VLC_EGENERIC;
     }
 
     return VLC_EGENERIC;

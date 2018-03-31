@@ -401,7 +401,7 @@ static int Demux( demux_t *p_demux )
     if( p_sys->i_pcr < 0 || p_sys->i_pcr < p_data->i_dts - VLC_TS_0 )
     {
         p_sys->i_pcr = p_data->i_dts - VLC_TS_0;
-        es_out_Control( p_demux->out, ES_OUT_SET_PCR, VLC_TS_0 + p_sys->i_pcr );
+        es_out_SetPCR( p_demux->out, VLC_TS_0 + p_sys->i_pcr );
     }
 
     if( fh.i_type == 'A' && p_sys->p_es_audio )
@@ -545,6 +545,14 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
 
         case DEMUX_GET_META:
+            return VLC_EGENERIC;
+
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, 0, -1, 0, 1, i_query, args );
+
         default:
             return VLC_EGENERIC;
 
@@ -659,7 +667,8 @@ static int HeaderLoad( demux_t *p_demux, header_t *h )
  */
 static int FrameHeaderLoad( demux_t *p_demux, frame_header_t *h )
 {
-    uint8_t* buffer = p_demux->p_sys->fh_buffer;
+    demux_sys_t *p_sys = p_demux->p_sys;
+    uint8_t* buffer = p_sys->fh_buffer;
 
     if( vlc_stream_Read( p_demux->s, buffer, 12 ) != 12 )
         return VLC_EGENERIC;

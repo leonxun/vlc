@@ -68,6 +68,14 @@ typedef struct
     uint8_t    i_background_alpha;/**< The transparency of the background */
     int        i_karaoke_background_color;/**< Background color for karaoke 0xRRGGBB */
     uint8_t    i_karaoke_background_alpha;/**< The transparency of the karaoke bg */
+
+    /* Line breaking */
+    enum
+    {
+        STYLE_WRAP_DEFAULT = 0,   /**< Breaks on whitespace or fallback on char */
+        STYLE_WRAP_CHAR,          /**< Breaks at character level only */
+        STYLE_WRAP_NONE,          /**< No line breaks (except explicit ones) */
+    } e_wrapinfo;
 } text_style_t;
 
 #define STYLE_ALPHA_OPAQUE      0xFF
@@ -87,6 +95,7 @@ typedef struct
 #define STYLE_HAS_BACKGROUND_ALPHA      (1 << 8)
 #define STYLE_HAS_K_BACKGROUND_COLOR    (1 << 9)
 #define STYLE_HAS_K_BACKGROUND_ALPHA    (1 << 10)
+#define STYLE_HAS_WRAP_INFO             (1 << 11)
 
 /* Style flags for \ref text_style_t */
 #define STYLE_BOLD              (1 << 0)
@@ -99,12 +108,27 @@ typedef struct
 #define STYLE_HALFWIDTH         (1 << 7)
 #define STYLE_MONOSPACED        (1 << 8)
 #define STYLE_DOUBLEWIDTH       (1 << 9)
+#define STYLE_BLINK_FOREGROUND  (1 << 10)
+#define STYLE_BLINK_BACKGROUND  (1 << 11)
 
 #define STYLE_DEFAULT_FONT_SIZE 20
 #define STYLE_DEFAULT_REL_FONT_SIZE 6.25
 
 
 typedef struct text_segment_t text_segment_t;
+typedef struct text_segment_ruby_t text_segment_ruby_t;
+
+/**
+ * Text segment ruby for subtitles
+ * Each ruby has an anchor to the segment char.
+ */
+struct text_segment_ruby_t
+{
+    char *psz_base;
+    char *psz_rt;
+    text_segment_ruby_t *p_next;
+};
+
 /**
  * Text segment for subtitles
  *
@@ -121,6 +145,7 @@ struct text_segment_t {
     char *psz_text;                   /**< text string of the segment */
     text_style_t *style;              /**< style applied to this segment */
     text_segment_t *p_next;           /**< next segment */
+    text_segment_ruby_t *p_ruby;      /**< ruby descriptions */
 };
 
 /**
@@ -198,6 +223,24 @@ VLC_API void text_segment_ChainDelete( text_segment_t * );
  * You may give it NULL, but it will return NULL.
  */
 VLC_API text_segment_t * text_segment_Copy( text_segment_t * );
+
+/**
+ * This function will create a ruby section for a text_segment
+ *
+ */
+VLC_API text_segment_ruby_t *text_segment_ruby_New( const char *psz_base,
+                                                    const char *psz_rt );
+
+/**
+ * Deletes a ruby sections chain
+ */
+VLC_API void text_segment_ruby_ChainDelete( text_segment_ruby_t *p_ruby );
+
+/**
+ * This function creates a text segment from a ruby section,
+ * and creates fallback string.
+ */
+VLC_API text_segment_t *text_segment_FromRuby( text_segment_ruby_t *p_ruby );
 
 static const struct {
     const char *psz_name;

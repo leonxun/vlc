@@ -1,7 +1,7 @@
 /*****************************************************************************
  *MainMenu.h: MacOS X interface module
  *****************************************************************************
- *Copyright (C) 2011-2015 Felix Paul Kühne
+ *Copyright (C) 2011-2018 Felix Paul Kühne
  *$Id$
  *
  *Authors: Felix Paul Kühne <fkuehne -at- videolan -dot- org>
@@ -93,13 +93,15 @@
 @property (readwrite, weak) IBOutlet NSMenuItem *fwd;
 @property (readwrite, weak) IBOutlet NSMenuItem *bwd;
 @property (readwrite, weak) IBOutlet NSMenuItem *jumpToTime;
+@property (readwrite, weak) IBOutlet NSMenu *rendererMenu;
+@property (readwrite, weak) IBOutlet NSMenuItem *rendererMenuItem;
+@property (readwrite, weak) IBOutlet NSMenuItem *rendererNoneItem;
 @property (readwrite, weak) IBOutlet NSMenuItem *program;
 @property (readwrite, weak) IBOutlet NSMenu *programMenu;
 @property (readwrite, weak) IBOutlet NSMenuItem *title;
 @property (readwrite, weak) IBOutlet NSMenu *titleMenu;
 @property (readwrite, weak) IBOutlet NSMenuItem *chapter;
 @property (readwrite, weak) IBOutlet NSMenu *chapterMenu;
-@property (readwrite, weak) IBOutlet NSMenuItem *renderer;
 
 @property (readwrite, weak) IBOutlet NSMenu *audioMenu;
 @property (readwrite, weak) IBOutlet NSMenuItem *vol_up;
@@ -212,7 +214,7 @@
 - (void)setupMenus;
 - (void)setSubmenusEnabled:(BOOL)b_enabled;
 - (void)setRateControlsEnabled:(BOOL)b_enabled;
-- (void)updateSidebarMenuItem;
+- (void)updateSidebarMenuItem:(BOOL)show;
 
 - (IBAction)openAddonManager:(id)sender;
 
@@ -252,6 +254,7 @@
 - (IBAction)setPlaybackRate:(id)sender;
 - (void)updatePlaybackRate;
 - (IBAction)toggleAtoBloop:(id)sender;
+- (IBAction)selectRenderer:(id)sender;
 
 - (IBAction)toggleFullscreen:(id)sender;
 - (IBAction)resizeVideoWindow:(id)sender;

@@ -42,13 +42,27 @@ test "$AUTOPOINT" || AUTOPOINT=autopoint
 if ! "$AUTOPOINT" --dry-run --force >/dev/null 2>&1; then
 	AUTOPOINT=true
 	cat << EOF
-NOTE: GNU gettext appears to be missing or out-of-date.
-Please install or update GNU gettext.
-Also check if you have cvs, a dependency of autopoint.
+NOTE: autopoint (GNU gettext-tools) appears to be missing or out-of-date.
+Please install or update GNU gettext tools.
 Otherwise, you will not be able to build a source tarball.
-==============================================================
+==========================================================================
 
 EOF
+fi
+
+# Check for flex and bison
+if ! flex --version >/dev/null 2>&1; then
+	echo "ERROR: flex is not installed." >&2
+	if ! test -f modules/codec/webvtt/CSSLexer.c; then
+		exit 1
+	fi
+fi
+
+if ! bison --version >/dev/null 2>&1; then
+	echo "ERROR: GNU bison is not installed." >&2
+	if ! test -f modules/codec/webvtt/CSSGrammar.c; then
+		exit 1
+	fi
 fi
 
 ###

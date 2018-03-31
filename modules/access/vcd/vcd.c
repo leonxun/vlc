@@ -46,7 +46,7 @@ static void Close( vlc_object_t * );
 vlc_module_begin ()
     set_shortname( N_("VCD"))
     set_description( N_("VCD input") )
-    set_capability( "access", 60 )
+    set_capability( "access", 0 )
     set_callbacks( Open, Close )
     set_category( CAT_INPUT )
     set_subcategory( SUBCAT_INPUT_ACCESS )
@@ -82,17 +82,17 @@ struct access_sys_t
     int         *p_sectors;                                 /* Track sectors */
 };
 
-static block_t *Block( access_t *, bool * );
-static int      Seek( access_t *, uint64_t );
-static int      Control( access_t *, int, va_list );
-static int      EntryPoints( access_t * );
+static block_t *Block( stream_t *, bool * );
+static int      Seek( stream_t *, uint64_t );
+static int      Control( stream_t *, int, va_list );
+static int      EntryPoints( stream_t * );
 
 /*****************************************************************************
  * VCDOpen: open vcd
  *****************************************************************************/
 static int Open( vlc_object_t *p_this )
 {
-    access_t     *p_access = (access_t *)p_this;
+    stream_t     *p_access = (stream_t *)p_this;
     access_sys_t *p_sys;
     if( p_access->psz_filepath == NULL )
         return VLC_EGENERIC;
@@ -215,7 +215,7 @@ error:
  *****************************************************************************/
 static void Close( vlc_object_t *p_this )
 {
-    access_t     *p_access = (access_t *)p_this;
+    stream_t     *p_access = (stream_t *)p_this;
     access_sys_t *p_sys = p_access->p_sys;
 
     for( size_t i = 0; i < ARRAY_SIZE(p_sys->titles); i++ )
@@ -228,7 +228,7 @@ static void Close( vlc_object_t *p_this )
 /*****************************************************************************
  * Control:
  *****************************************************************************/
-static int Control( access_t *p_access, int i_query, va_list args )
+static int Control( stream_t *p_access, int i_query, va_list args )
 {
     access_sys_t *p_sys = p_access->p_sys;
     input_title_t ***ppp_title;
@@ -265,10 +265,11 @@ static int Control( access_t *p_access, int i_query, va_list args )
 
         case STREAM_GET_TITLE_INFO:
             ppp_title = va_arg( args, input_title_t*** );
-            *va_arg( args, int* ) = p_sys->i_titles;
-
             /* Duplicate title infos */
-            *ppp_title = xmalloc( sizeof(input_title_t *) * p_sys->i_titles );
+            *ppp_title = vlc_alloc( p_sys->i_titles, sizeof(input_title_t *) );
+            if (!*ppp_title)
+                return VLC_ENOMEM;
+            *va_arg( args, int* ) = p_sys->i_titles;
             for( int i = 0; i < p_sys->i_titles; i++ )
                 (*ppp_title)[i] = vlc_input_title_New();
             break;
@@ -328,7 +329,7 @@ static int Control( access_t *p_access, int i_query, va_list args )
 /*****************************************************************************
  * Block:
  *****************************************************************************/
-static block_t *Block( access_t *p_access, bool *restrict eof )
+static block_t *Block( stream_t *p_access, bool *restrict eof )
 {
     access_sys_t *p_sys = p_access->p_sys;
     int i_blocks = VCD_BLOCKS_ONCE;
@@ -400,7 +401,7 @@ static block_t *Block( access_t *p_access, bool *restrict eof )
 /*****************************************************************************
  * Seek:
  *****************************************************************************/
-static int Seek( access_t *p_access, uint64_t i_pos )
+static int Seek( stream_t *p_access, uint64_t i_pos )
 {
     access_sys_t *p_sys = p_access->p_sys;
     int i_title = p_sys->i_current_title;
@@ -430,7 +431,7 @@ static int Seek( access_t *p_access, uint64_t i_pos )
 /*****************************************************************************
  * EntryPoints: Reads the information about the entry points on the disc.
  *****************************************************************************/
-static int EntryPoints( access_t *p_access )
+static int EntryPoints( stream_t *p_access )
 {
     access_sys_t *p_sys = p_access->p_sys;
     uint8_t      sector[VCD_DATA_SIZE];

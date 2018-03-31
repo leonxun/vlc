@@ -346,7 +346,7 @@ static int Demux( demux_t *p_demux )
     mtime_t i_pcr = VLC_TS_INVALID;
     for( int i = 0; i < p_sys->i_track; i++ )
     {
-        real_track_t *tk = p_sys->track[i];
+        tk = p_sys->track[i];
 
         if( i_pcr <= VLC_TS_INVALID || ( tk->i_last_dts > VLC_TS_INVALID && tk->i_last_dts < i_pcr ) )
             i_pcr = tk->i_last_dts;
@@ -354,7 +354,7 @@ static int Demux( demux_t *p_demux )
     if( i_pcr > VLC_TS_INVALID && i_pcr != p_sys->i_pcr )
     {
         p_sys->i_pcr = i_pcr;
-        es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_sys->i_pcr );
+        es_out_SetPCR( p_demux->out, p_sys->i_pcr );
     }
     return 1;
 }
@@ -390,7 +390,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
         case DEMUX_GET_POSITION:
             pf = va_arg( args, double * );
 
-            /* read stream size maybe failed in rtsp streaming, 
+            /* read stream size maybe failed in rtsp streaming,
                so use duration to determin the position at first  */
             if( p_sys->i_our_duration > 0 )
             {
@@ -457,7 +457,7 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
 
         case DEMUX_GET_LENGTH:
             pi64 = va_arg( args, int64_t * );
- 
+
             if( p_sys->i_our_duration <= 0 )
             {
                 *pi64 = 0;
@@ -485,6 +485,13 @@ static int Control( demux_t *p_demux, int i_query, va_list args )
             return VLC_SUCCESS;
         }
 
+        case DEMUX_CAN_PAUSE:
+        case DEMUX_SET_PAUSE_STATE:
+        case DEMUX_CAN_CONTROL_PACE:
+        case DEMUX_GET_PTS_DELAY:
+            return demux_vaControlHelper( p_demux->s, p_sys->i_data_offset,
+                                          p_sys->i_data_size, 0, 1, i_query, args );
+
         case DEMUX_GET_FPS:
         default:
             return VLC_EGENERIC;
@@ -506,7 +513,7 @@ static void CheckPcr( demux_t *p_demux, real_track_t *tk, mtime_t i_dts )
         return;
 
     p_sys->i_pcr = i_dts;
-    es_out_Control( p_demux->out, ES_OUT_SET_PCR, p_sys->i_pcr );
+    es_out_SetPCR( p_demux->out, p_sys->i_pcr );
 }
 
 static void DemuxVideo( demux_t *p_demux, real_track_t *tk, mtime_t i_dts, unsigned i_flags )
@@ -964,7 +971,7 @@ static int ControlSeekByte( demux_t *p_demux, int64_t i_bytes )
  *****************************************************************************/
 
 /**
- * This function will read a pascal string with size stored in 2 bytes from
+ * This function will read a Pascal string with size stored in 2 bytes from
  * a stream_t.
  *
  * FIXME what is the right charset ?
@@ -980,12 +987,18 @@ static char *StreamReadString2( stream_t *s )
     if( i_length <= 0 )
         return NULL;
 
-    char *psz_string = xcalloc( 1, i_length + 1 );
+    char *psz_string = malloc( i_length + 1 );
+    if( unlikely(psz_string == NULL) )
+        return NULL;
 
-    vlc_stream_Read( s, psz_string, i_length ); /* Valid even if !psz_string */
+    if( vlc_stream_Read( s, psz_string, i_length ) < i_length )
+    {
+        free( psz_string );
+        return NULL;
+    }
 
-    if( psz_string )
-        EnsureUTF8( psz_string );
+    psz_string[i_length] = '\0';
+    EnsureUTF8( psz_string );
     return psz_string;
 }
 
@@ -1199,9 +1212,8 @@ static void HeaderINDX( demux_t *p_demux )
     if( p_sys->i_index_offset == 0 )
         return;
 
-    vlc_stream_Seek( p_demux->s, p_sys->i_index_offset );
-
-    if( vlc_stream_Read( p_demux->s, buffer, 20 ) < 20 )
+    if( vlc_stream_Seek( p_demux->s, p_sys->i_index_offset )
+     || vlc_stream_Read( p_demux->s, buffer, 20 ) < 20 )
         return ;
 
     const uint32_t i_id = VLC_FOURCC( buffer[0], buffer[1], buffer[2], buffer[3] );
@@ -1247,7 +1259,7 @@ static void HeaderINDX( demux_t *p_demux )
         }
 
         real_index_t *p_idx = &p_sys->p_index[i];
-        
+
         p_idx->i_time_offset = GetDWBE( &p_entry[2] );
         p_idx->i_file_offset = GetDWBE( &p_entry[6] );
         p_idx->i_frame_index = GetDWBE( &p_entry[10] );
@@ -1611,6 +1623,7 @@ static int CodecAudioParse( demux_t *p_demux, int i_tk_id, const uint8_t *p_data
         // can be selected.
         fmt.i_bitrate = fmt.audio.i_rate;
         msg_Dbg( p_demux, "    - sipr flavor=%i", i_flavor );
+        /* fall through */
 
     case VLC_CODEC_COOK:
     case VLC_CODEC_ATRAC3:

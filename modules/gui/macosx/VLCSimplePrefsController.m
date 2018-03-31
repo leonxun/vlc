@@ -27,7 +27,7 @@
 #import "CompatibilityFixes.h"
 #import "VLCSimplePrefsController.h"
 #import "prefs.h"
-#import <vlc_keys.h>
+#import <vlc_actions.h>
 #import <vlc_interface.h>
 #import <vlc_dialog.h>
 #import <vlc_modules.h>
@@ -44,133 +44,73 @@
 #import <Sparkle/Sparkle.h>                        //for o_intf_last_updateLabel
 #endif
 
-static const char *const ppsz_language[] =
-{
-    "auto",
-    "en",
-    "ar",
-    "bn",
-    "pt_BR",
-    "en_GB",
-    "el",
-    "bg",
-    "ca",
-    "zh_TW",
-    "cs",
-    "cy",
-    "da",
-    "nl",
-    "fi",
-    "et",
-    "eu",
-    "fr",
-    "ga",
-    "gd",
-    "gl",
-    "ka",
-    "de",
-    "he",
-    "hr",
-    "hu",
-    "hy",
-    "is",
-    "id",
-    "it",
-    "ja",
-    "ko",
-    "lt",
-    "mn",
-    "ms",
-    "nb",
-    "nn",
-    "kk",
-    "km",
-    "ne",
-    "oc",
-    "fa",
-    "pl",
-    "pt_PT",
-    "pa",
-    "ro",
-    "ru",
-    "zh_CN",
-    "si",
-    "sr",
-    "sk",
-    "sl",
-    "ckb",
-    "es",
-    "sv",
-    "te",
-    "tr",
-    "uk",
-    "vi",
-    "wa",
-    NULL,
-};
 
-static const char *const ppsz_language_text[] =
-{
-    N_("Auto"),
-    "American English",
-    "عربي",
-    "বাংলা",
-    "Português Brasileiro",
-    "British English",
-    "Νέα Ελληνικά",
-    "български език",
-    "Català",
-    "正體中文",
-    "Čeština",
-    "Cymraeg",
-    "Dansk",
-    "Nederlands",
-    "Suomi",
-    "eesti keel",
-    "Euskara",
-    "Français",
-    "Gaeilge",
-    "Gàidhlig",
-    "Galego",
-    "ქართული",
-    "Deutsch",
-    "עברית",
-    "hrvatski",
-    "Magyar",
-    "հայերեն",
-    "íslenska",
-    "Bahasa Indonesia",
-    "Italiano",
-    "日本語",
-    "한국어",
-    "lietuvių",
-    "Монгол хэл",
-    "Melayu",
-    "Bokmål",
-    "Nynorsk",
-    "Қазақ тілі",
-    "ភាសាខ្មែរ",
-    "नेपाली",
-    "Occitan",
-    "فارسی",
-    "Polski",
-    "Português",
-    "ਪੰਜਾਬੀ",
-    "Română",
-    "Русский",
-    "简体中文",
-    "සිංහල",
-    "српски",
-    "Slovensky",
-    "slovenščina",
-    "کوردیی سۆرانی",
-    "Español",
-    "Svenska",
-    "తెలుగు",
-    "Türkçe",
-    "украї́нська мо́ва",
-    "tiếng Việt",
-    "Walon",
+static struct {
+    const char iso[6];
+    const char name[34];
+    BOOL isRightToLeft;
+
+} const language_map[] = {
+    { "auto",  N_("Auto"),              NO },
+    { "en",    "American English",      NO },
+    { "ar",    "عربي",                  YES },
+    { "bn",    "বাংলা",                  NO },
+    { "pt_BR", "Português Brasileiro",  NO },
+    { "en_GB", "British English",       NO },
+    { "el",    "Νέα Ελληνικά",          NO },
+    { "bg",    "български език",        NO },
+    { "ca",    "Català",                NO },
+    { "zh_TW", "正體中文",               NO },
+    { "cs",    "Čeština",               NO },
+    { "cy",    "Cymraeg",               NO },
+    { "da",    "Dansk",                 NO },
+    { "nl",    "Nederlands",            NO },
+    { "fi",    "Suomi",                 NO },
+    { "et",    "eesti keel",            NO },
+    { "eu",    "Euskara",               NO },
+    { "fr",    "Français",              NO },
+    { "ga",    "Gaeilge",               NO },
+    { "gd",    "Gàidhlig",              NO },
+    { "gl",    "Galego",                NO },
+    { "ka",    "ქართული",               NO },
+    { "de",    "Deutsch",               NO },
+    { "he",    "עברית",                  YES },
+    { "hr",    "hrvatski",              NO },
+    { "hu",    "Magyar",                NO },
+    { "hy",    "հայերեն",                NO },
+    { "is",    "íslenska",              NO },
+    { "id",    "Bahasa Indonesia",      NO },
+    { "it",    "Italiano",              NO },
+    { "ja",    "日本語",                 NO },
+    { "ko",    "한국어",                  NO },
+    { "lt",    "lietuvių",              NO },
+    { "mn",    "Монгол хэл",            NO },
+    { "ms",    "Melayu",                NO },
+    { "nb",    "Bokmål",                NO },
+    { "nn",    "Nynorsk",               NO },
+    { "kk",    "Қазақ тілі",            NO },
+    { "km",    "ភាសាខ្មែរ",                NO },
+    { "ne",    "नेपाली",                  NO },
+    { "oc",    "Occitan",               NO },
+    { "fa",    "فارسی",                 YES },
+    { "pl",    "Polski",                NO },
+    { "pt_PT", "Português",             NO },
+    { "pa",    "ਪੰਜਾਬੀ",                  NO },
+    { "ro",    "Română",                NO },
+    { "ru",    "Русский",               NO },
+    { "zh_CN", "简体中文",               NO },
+    { "si",    "සිංහල",                NO },
+    { "sr",    "српски",                NO },
+    { "sk",    "Slovensky",             NO },
+    { "sl",    "slovenščina",           NO },
+    { "ckb",   "کوردیی سۆرانی",         YES },
+    { "es",    "Español",               NO },
+    { "sv",    "Svenska",               NO },
+    { "te",    "తెలుగు",                 NO },
+    { "tr",    "Türkçe",                NO },
+    { "uk",    "украї́нська мо́ва",       NO },
+    { "vi",    "tiếng Việt",            NO },
+    { "wa",    "Walon",                 NO }
 };
 
 static NSString* VLCSPrefsToolbarIdentifier = @"Our Simple Preferences Toolbar Identifier";
@@ -189,7 +129,6 @@ static NSString* VLCHotkeysSettingToolbarIdentifier = @"Hotkeys Settings Item Id
     BOOL _osdSettingChanged;
     BOOL _inputSettingChanged;
     BOOL _hotkeyChanged;
-    id _currentlyShownCategoryView;
 
     NSOpenPanel *_selectFolderPanel;
     NSArray *_hotkeyDescriptions;
@@ -247,6 +186,13 @@ static NSString* VLCHotkeysSettingToolbarIdentifier = @"Hotkeys Settings Item Id
 
     /* setup useful stuff */
     _hotkeysNonUseableKeys = [NSArray arrayWithObjects:@"Command-c", @"Command-x", @"Command-v", @"Command-a", @"Command-," , @"Command-h", @"Command-Alt-h", @"Command-Shift-o", @"Command-o", @"Command-d", @"Command-n", @"Command-s", @"Command-l", @"Command-r", @"Command-3", @"Command-m", @"Command-w", @"Command-Shift-w", @"Command-Shift-c", @"Command-Shift-p", @"Command-i", @"Command-e", @"Command-Shift-e", @"Command-b", @"Command-Shift-m", @"Command-Ctrl-m", @"Command-?", @"Command-Alt-?", @"Command-Shift-f", nil];
+
+    // Workaround for Mac OS X Lion, which does not apply the same constraints when set in IB
+    NSView *clipView = _contentView.superview;
+
+    NSDictionary *views = @{ @"view": _contentView };
+    NSArray *constraints = [NSLayoutConstraint constraintsWithVisualFormat:@"|[view]|" options:0 metrics:nil views:views];
+    [clipView addConstraints:constraints];
 }
 
 #define CreateToolbarItem(name, desc, img, sel) \
@@ -317,7 +263,6 @@ create_toolbar_item(NSString *itemIdent, NSString *name, NSString *desc, NSStrin
 - (void)initStrings
 {
     /* audio */
-    [_audio_dolbyLabel setStringValue: _NS("Force detection of Dolby Surround")];
     [_audio_effectsBox setTitle: _NS("Audio Effects")];
     [_audio_enableCheckbox setTitle: _NS("Enable audio")];
     [_audio_generalBox setTitle: _NS("General Audio")];
@@ -384,6 +329,7 @@ create_toolbar_item(NSString *itemIdent, NSString *name, NSString *desc, NSStrin
     [_intf_last_updateLabel setStringValue: @""];
 
     [_intf_luahttpBox setTitle:_NS("HTTP web interface")];
+    [_intf_enableluahttpCheckbox setTitle: _NS("Enable HTTP web interface")];
     [_intf_luahttppwdLabel setStringValue:_NS("Password")];
 
     /* Subtitles and OSD */
@@ -438,9 +384,7 @@ create_toolbar_item(NSString *itemIdent, NSString *name, NSString *desc, NSStrin
 #define config_GetLabel(a,b) __config_GetLabel(VLC_OBJECT(a),b)
 static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *psz_name)
 {
-    module_config_t *p_config;
-
-    p_config = config_FindConfig(p_this, psz_name);
+    module_config_t *p_config = config_FindConfig(psz_name);
 
     /* sanity checks */
     if (!p_config) {
@@ -466,13 +410,12 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     module_config_t *p_item;
 
     [object removeAllItems];
-    p_item = config_FindConfig(VLC_OBJECT(p_intf), name);
+    p_item = config_FindConfig(name);
     /* serious problem, if no item found */
     assert(p_item);
 
     char **values, **texts;
-    ssize_t count = config_GetPszChoices(VLC_OBJECT(getIntf()), name,
-                                         &values, &texts);
+    ssize_t count = config_GetPszChoices(name, &values, &texts);
     if (count < 0) {
         msg_Err(p_intf, "Cannot get choices for %s", name);
         return;
@@ -514,14 +457,14 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     module_config_t *p_item;
 
     [object removeAllItems];
-    p_item = config_FindConfig(VLC_OBJECT(p_intf), name);
+    p_item = config_FindConfig(name);
 
     /* serious problem, if no item found */
     assert(p_item);
 
     int64_t *values;
     char **texts;
-    ssize_t count = config_GetIntChoices(VLC_OBJECT(getIntf()), name, &values, &texts);
+    ssize_t count = config_GetIntChoices(name, &values, &texts);
     for (ssize_t i = 0; i < count; i++) {
         NSMenuItem *mi = [[NSMenuItem alloc] initWithTitle: toNSStr(texts[i]) action: NULL keyEquivalent: @""];
         [mi setRepresentedObject:[NSNumber numberWithInt:values[i]]];
@@ -540,16 +483,46 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 
 - (void)setupButton: (NSButton *)object forBoolValue: (const char *)name
 {
-    [object setState: config_GetInt(p_intf, name)];
+    [object setState: config_GetInt(name)];
     [object setToolTip: _NS(config_GetLabel(p_intf, name))];
 }
 
 - (void)setupField:(NSTextField *)object forOption:(const char *)psz_option
 {
-    char *psz_tmp = config_GetPsz(p_intf, psz_option);
+    char *psz_tmp = config_GetPsz(psz_option);
     [object setStringValue: toNSStr(psz_tmp)];
     [object setToolTip: _NS(config_GetLabel(p_intf, psz_option))];
     free(psz_tmp);
+}
+
+- (BOOL)hasModule:(NSString *)moduleName inConfig:(NSString *)config
+{
+    char *value = config_GetPsz([config UTF8String]);
+    NSString *modules = toNSStr(value);
+    free(value);
+
+    return [[modules componentsSeparatedByString:@":"] containsObject:moduleName];
+}
+
+- (void)changeModule:(NSString *)moduleName inConfig:(NSString *)config enable:(BOOL)enable
+{
+    char *value = config_GetPsz([config UTF8String]);
+    NSString *modules = toNSStr(value);
+    free(value);
+
+    NSMutableArray *components = [[modules componentsSeparatedByString:@":"] mutableCopy];
+    if (enable) {
+        if (![components containsObject:moduleName]) {
+            [components addObject:moduleName];
+        }
+    } else {
+        [components removeObject:moduleName];
+    }
+
+    // trim empty entries
+    [components removeObject:@""];
+
+    config_PutPsz([config UTF8String], [[components componentsJoinedByString:@":"] UTF8String]);
 }
 
 - (void)resetControls
@@ -564,10 +537,10 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     NSUInteger sel = 0;
     const char *pref = NULL;
     pref = [[[NSUserDefaults standardUserDefaults] objectForKey:@"language"] UTF8String];
-    for (int x = 0; ppsz_language[x] != NULL; x++) {
-        [_intf_languagePopup addItemWithTitle:toNSStr(ppsz_language_text[x])];
+    for (int x = 0; x < ARRAY_SIZE(language_map); x++) {
+        [_intf_languagePopup addItemWithTitle:toNSStr(language_map[x].name)];
         if (pref) {
-            if (!strcmp(ppsz_language[x], pref))
+            if (!strcmp(language_map[x].iso, pref))
                 sel = x;
         }
     }
@@ -601,19 +574,20 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
         [_intf_last_updateLabel setStringValue: _NS("No check was performed yet.")];
 #endif
 
-    psz_tmp = config_GetPsz(p_intf, "control");
-    if (psz_tmp) {
-        [_intf_enableNotificationsCheckbox setState: (NSInteger)strstr(psz_tmp, "growl")];
-        free(psz_tmp);
-    } else
-        [_intf_enableNotificationsCheckbox setState: NSOffState];
-    if (config_GetInt(p_intf, "macosx-interfacestyle")) {
+    BOOL growlEnabled = [self hasModule:@"growl" inConfig:@"control"];
+    [_intf_enableNotificationsCheckbox setState: growlEnabled ? NSOnState : NSOffState];
+
+    if (config_GetInt("macosx-interfacestyle")) {
         [_intf_style_darkButtonCell setState: YES];
         [_intf_style_brightButtonCell setState: NO];
     } else {
         [_intf_style_darkButtonCell setState: NO];
         [_intf_style_brightButtonCell setState: YES];
     }
+
+    BOOL httpEnabled = [self hasModule:@"http" inConfig:@"extraintf"];
+    [_intf_enableluahttpCheckbox setState: httpEnabled ? NSOnState : NSOffState];
+    _intf_luahttppwdTextField.enabled = httpEnabled;
 
     [self setupField:_intf_luahttppwdTextField forOption: "http-password"];
 
@@ -622,7 +596,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
      ******************/
     [self setupButton:_audio_enableCheckbox forBoolValue: "audio"];
 
-    if (config_GetInt(p_intf, "volume-save")) {
+    if (config_GetInt("volume-save")) {
         [_audio_autosavevol_yesButtonCell setState: NSOnState];
         [_audio_autosavevol_noButtonCell setState: NSOffState];
         [_audio_volTextField setEnabled: NO];
@@ -642,7 +616,6 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
         [_audio_volTextField setIntValue: i];
     }
 
-    [self setupButton:_audio_dolbyPopup forIntList: "force-dolby-surround"];
     [self setupField:_audio_langTextField forOption: "audio-language"];
 
     [self setupButton:_audio_visualPopup forModuleList: "audio-visual"];
@@ -652,7 +625,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
         [self setupField:_audio_lastuserTextField forOption:"lastfm-username"];
         [self setupField:_audio_lastpwdSecureTextField forOption:"lastfm-password"];
 
-        if (config_ExistIntf(VLC_OBJECT(p_intf), "audioscrobbler")) {
+        if (config_ExistIntf("audioscrobbler")) {
             [_audio_lastCheckbox setState: NSOnState];
             [_audio_lastuserTextField setEnabled: YES];
             [_audio_lastpwdSecureTextField setEnabled: YES];
@@ -688,7 +661,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
         i++;
     }
     [_video_devicePopup selectItemAtIndex: 0];
-    [_video_devicePopup selectItemWithTag: config_GetInt(p_intf, "macosx-vdev")];
+    [_video_devicePopup selectItemWithTag: config_GetInt("macosx-vdev")];
 
     [self setupField:_video_snap_folderTextField forOption:"snapshot-path"];
     [self setupField:_video_snap_prefixTextField forOption:"snapshot-prefix"];
@@ -704,7 +677,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
      * input & codecs settings *
      ***************************/
     [self setupField:_input_recordTextField forOption:"input-record-path"];
-    [_input_postprocTextField setIntValue: config_GetInt(p_intf, "postproc-q")];
+    [_input_postprocTextField setIntValue: config_GetInt("postproc-q")];
     [_input_postprocTextField setToolTip: _NS(config_GetLabel(p_intf, "postproc-q"))];
     [self setupButton:_input_skipFramesCheckbox forBoolValue: "skip-frames"];
     [self setupButton:_input_aviPopup forIntList: "avi-index"];
@@ -726,11 +699,11 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 
     #define TestCaC(name, factor) \
     cache_equal = cache_equal && \
-    (i_cache * factor == config_GetInt(p_intf, name));
+    (i_cache * factor == config_GetInt(name));
 
     /* Select the accurate value of the PopupButton */
     bool cache_equal = true;
-    int i_cache = config_GetInt(p_intf, "file-caching");
+    int i_cache = config_GetInt("file-caching");
 
     TestCaC("network-caching", 10/3);
     TestCaC("disc-caching", 1);
@@ -755,7 +728,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     [self setupField:_osd_fontTextField forOption: "freetype-font"];
     [self setupButton:_osd_font_colorPopup forIntList: "freetype-color"];
     [self setupButton:_osd_font_sizePopup forIntList: "freetype-rel-fontsize"];
-    i = config_GetInt(p_intf, "freetype-opacity") * 100.0 / 255.0 + 0.5;
+    i = config_GetInt("freetype-opacity") * 100.0 / 255.0 + 0.5;
     [_osd_opacityTextField setIntValue: i];
     [_osd_opacitySlider setIntValue: i];
     [_osd_opacitySlider setToolTip: _NS(config_GetLabel(p_intf, "freetype-opacity"))];
@@ -767,7 +740,6 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
     /********************
      * hotkeys settings *
      ********************/
-    const struct hotkey *p_hotkeys = p_intf->obj.libvlc->p_hotkeys;
     _hotkeySettings = [[NSMutableArray alloc] init];
     NSMutableArray *tempArray_desc = [[NSMutableArray alloc] init];
     NSMutableArray *tempArray_names = [[NSMutableArray alloc] init];
@@ -859,7 +831,7 @@ static inline const char * __config_GetLabel(vlc_object_t *p_this, const char *p
 {
     if (i_return == NSAlertAlternateReturn) {
         /* reset VLC's config */
-        config_ResetAll(p_intf);
+        config_ResetAll();
         [self resetControls];
 
         /* force config file creation, since libvlc won't exit normally */
@@ -885,7 +857,7 @@ static inline void save_int_list(intf_thread_t * p_intf, id object, const char *
     NSNumber *p_valueobject = (NSNumber *)[[object selectedItem] representedObject];
     if (p_valueobject) {
         assert([p_valueobject isKindOfClass:[NSNumber class]]);
-        config_PutInt(p_intf, name, [p_valueobject intValue]);
+        config_PutInt(name, [p_valueobject intValue]);
     }
 }
 
@@ -894,21 +866,38 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     NSString *p_stringobject = (NSString *)[[object selectedItem] representedObject];
     if (p_stringobject) {
         assert([p_stringobject isKindOfClass:[NSString class]]);
-        config_PutPsz(p_intf, name, [p_stringobject UTF8String]);
+        config_PutPsz(name, [p_stringobject UTF8String]);
     }
+}
+
++ (BOOL)updateRightToLeftSettings
+{
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *isoCode = [defaults stringForKey:@"language"];
+
+    if (!isoCode || [isoCode isEqualToString:@"auto"]) {
+        // Automatic handling of right to left
+        [defaults removeObjectForKey:@"NSForceRightToLeftWritingDirection"];
+        [defaults removeObjectForKey:@"AppleTextDirection"];
+    } else {
+        for(int i = 0; i < ARRAY_SIZE(language_map); i++) {
+            if (!strcmp(language_map[i].iso, [isoCode UTF8String])) {
+                [defaults setBool:language_map[i].isRightToLeft forKey:@"NSForceRightToLeftWritingDirection"];
+                [defaults setBool:language_map[i].isRightToLeft forKey:@"AppleTextDirection"];
+                return YES;
+            }
+        }
+    }
+
+    return NO;
 }
 
 - (void)saveChangedSettings
 {
-    NSString *tmpString;
-    NSRange tmpRange;
-
 #define SaveIntList(object, name) save_int_list(p_intf, object, name)
 
 #define SaveStringList(object, name) save_string_list(p_intf, object, name)
 #define SaveModuleList(object, name) SaveStringList(object, name)
-
-#define getString(name) [NSString stringWithFormat:@"%s", config_GetPsz(p_intf, name)]
 
     /**********************
      * interface settings *
@@ -916,38 +905,22 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     if (_intfSettingChanged) {
         NSUInteger index = [_intf_languagePopup indexOfSelectedItem];
         NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults setObject:toNSStr(ppsz_language[index]) forKey:@"language"];
+        [defaults setObject:toNSStr(language_map[index].iso) forKey:@"language"];
+        [VLCSimplePrefsController updateRightToLeftSettings];
         [defaults synchronize];
 
-        config_PutInt(p_intf, "metadata-network-access", [_intf_artCheckbox state]);
+        config_PutInt("metadata-network-access", [_intf_artCheckbox state]);
 
-        config_PutInt(p_intf, "macosx-appleremote", [_intf_appleremoteCheckbox state]);
-        config_PutInt(p_intf, "macosx-appleremote-sysvol", [_intf_appleremote_sysvolCheckbox state]);
-        config_PutInt(p_intf, "macosx-statusicon", [_intf_statusIconCheckbox state]);
-        config_PutInt(p_intf, "macosx-mediakeys", [_intf_mediakeysCheckbox state]);
-        config_PutInt(p_intf, "macosx-interfacestyle", [_intf_style_darkButtonCell state]);
+        config_PutInt("macosx-appleremote", [_intf_appleremoteCheckbox state]);
+        config_PutInt("macosx-appleremote-sysvol", [_intf_appleremote_sysvolCheckbox state]);
+        config_PutInt("macosx-statusicon", [_intf_statusIconCheckbox state]);
+        config_PutInt("macosx-mediakeys", [_intf_mediakeysCheckbox state]);
+        config_PutInt("macosx-interfacestyle", [_intf_style_darkButtonCell state]);
 
-        if ([_intf_enableNotificationsCheckbox state] == NSOnState) {
-            tmpString = getString("control");
-            tmpRange = [tmpString rangeOfString:@"growl"];
-            if ([tmpString length] > 0 && tmpRange.location == NSNotFound)
-            {
-                tmpString = [tmpString stringByAppendingString: @":growl"];
-                config_PutPsz(p_intf, "control", [tmpString UTF8String]);
-            }
-            else
-                config_PutPsz(p_intf, "control", "growl");
-        } else {
-            tmpString = getString("control");
-            if (! [tmpString isEqualToString:@""])
-            {
-                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@":growl"]];
-                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"growl:"]];
-                tmpString = [tmpString stringByTrimmingCharactersInSet: [NSCharacterSet characterSetWithCharactersInString:@"growl"]];
-                config_PutPsz(p_intf, "control", [tmpString UTF8String]);
-            }
-        }
-        config_PutPsz(p_intf, "http-password", [[_intf_luahttppwdTextField stringValue] UTF8String]);
+        [self changeModule:@"growl" inConfig:@"control" enable:[_intf_enableNotificationsCheckbox state] == NSOnState];
+
+        [self changeModule:@"http" inConfig:@"extraintf" enable:[_intf_enableluahttpCheckbox state] == NSOnState];
+        config_PutPsz("http-password", [[_intf_luahttppwdTextField stringValue] UTF8String]);
 
         SaveIntList(_intf_pauseitunesPopup, "macosx-control-itunes");
         SaveIntList(_intf_continueplaybackPopup, "macosx-continue-playback");
@@ -964,15 +937,13 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
      * audio settings *
      ******************/
     if (_audioSettingChanged) {
-        config_PutInt(p_intf, "audio", [_audio_enableCheckbox state]);
-        config_PutInt(p_intf, "volume-save", [_audio_autosavevol_yesButtonCell state]);
+        config_PutInt("audio", [_audio_enableCheckbox state]);
+        config_PutInt("volume-save", [_audio_autosavevol_yesButtonCell state]);
         var_SetBool(p_intf, "volume-save", [_audio_autosavevol_yesButtonCell state]);
         if ([_audio_volTextField isEnabled])
-            config_PutInt(p_intf, "auhal-volume", ([_audio_volTextField intValue] * AOUT_VOLUME_MAX) / 200);
+            config_PutInt("auhal-volume", ([_audio_volTextField intValue] * AOUT_VOLUME_MAX) / 200);
 
-        SaveIntList(_audio_dolbyPopup, "force-dolby-surround");
-
-        config_PutPsz(p_intf, "audio-language", [[_audio_langTextField stringValue] UTF8String]);
+        config_PutPsz("audio-language", [[_audio_langTextField stringValue] UTF8String]);
 
         SaveModuleList(_audio_visualPopup, "audio-visual");
 
@@ -980,12 +951,12 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
         if (module_exists("audioscrobbler")) {
             [_audio_lastCheckbox setEnabled: YES];
             if ([_audio_lastCheckbox state] == NSOnState)
-                config_AddIntf(p_intf, "audioscrobbler");
+                config_AddIntf("audioscrobbler");
             else
-                config_RemoveIntf(p_intf, "audioscrobbler");
+                config_RemoveIntf("audioscrobbler");
 
-            config_PutPsz(p_intf, "lastfm-username", [[_audio_lastuserTextField stringValue] UTF8String]);
-            config_PutPsz(p_intf, "lastfm-password", [[_audio_lastpwdSecureTextField stringValue] UTF8String]);
+            config_PutPsz("lastfm-username", [[_audio_lastuserTextField stringValue] UTF8String]);
+            config_PutPsz("lastfm-password", [[_audio_lastpwdSecureTextField stringValue] UTF8String]);
         }
         else
             [_audio_lastCheckbox setEnabled: NO];
@@ -996,21 +967,21 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
      * video settings *
      ******************/
     if (_videoSettingChanged) {
-        config_PutInt(p_intf, "video", [_video_enableCheckbox state]);
-        config_PutInt(p_intf, "fullscreen", [_video_startInFullscreenCheckbox state]);
-        config_PutInt(p_intf, "video-deco", [_video_videodecoCheckbox state]);
-        config_PutInt(p_intf, "video-on-top", [_video_onTopCheckbox state]);
-        config_PutInt(p_intf, "macosx-black", [_video_blackScreenCheckbox state]);
+        config_PutInt("video", [_video_enableCheckbox state]);
+        config_PutInt("fullscreen", [_video_startInFullscreenCheckbox state]);
+        config_PutInt("video-deco", [_video_videodecoCheckbox state]);
+        config_PutInt("video-on-top", [_video_onTopCheckbox state]);
+        config_PutInt("macosx-black", [_video_blackScreenCheckbox state]);
 
-        config_PutInt(p_intf, "macosx-pause-minimized", [_video_pauseWhenMinimizedCheckbox state]);
+        config_PutInt("macosx-pause-minimized", [_video_pauseWhenMinimizedCheckbox state]);
 
-        config_PutInt(p_intf, "embedded-video", [_video_embeddedCheckbox state]);
-        config_PutInt(p_intf, "macosx-nativefullscreenmode", [_video_nativeFullscreenCheckbox state]);
-        config_PutInt(p_intf, "macosx-vdev", [[_video_devicePopup selectedItem] tag]);
+        config_PutInt("embedded-video", [_video_embeddedCheckbox state]);
+        config_PutInt("macosx-nativefullscreenmode", [_video_nativeFullscreenCheckbox state]);
+        config_PutInt("macosx-vdev", [[_video_devicePopup selectedItem] tag]);
 
-        config_PutPsz(p_intf, "snapshot-path", [[_video_snap_folderTextField stringValue] UTF8String]);
-        config_PutPsz(p_intf, "snapshot-prefix", [[_video_snap_prefixTextField stringValue] UTF8String]);
-        config_PutInt(p_intf, "snapshot-sequential", [_video_snap_seqnumCheckbox state]);
+        config_PutPsz("snapshot-path", [[_video_snap_folderTextField stringValue] UTF8String]);
+        config_PutPsz("snapshot-prefix", [[_video_snap_prefixTextField stringValue] UTF8String]);
+        config_PutInt("snapshot-sequential", [_video_snap_seqnumCheckbox state]);
         SaveStringList(_video_snap_formatPopup, "snapshot-format");
         SaveIntList(_video_deinterlacePopup, "deinterlace");
         SaveStringList(_video_deinterlace_modePopup, "deinterlace-mode");
@@ -1021,15 +992,15 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
      * input & codecs settings *
      ***************************/
     if (_inputSettingChanged) {
-        config_PutPsz(p_intf, "input-record-path", [[_input_recordTextField stringValue] UTF8String]);
-        config_PutInt(p_intf, "postproc-q", [_input_postprocTextField intValue]);
-        config_PutInt(p_intf, "skip-frames", [_input_skipFramesCheckbox state]);
+        config_PutPsz("input-record-path", [[_input_recordTextField stringValue] UTF8String]);
+        config_PutInt("postproc-q", [_input_postprocTextField intValue]);
+        config_PutInt("skip-frames", [_input_skipFramesCheckbox state]);
 
         SaveIntList(_input_aviPopup, "avi-index");
 
         SaveIntList(_input_skipLoopPopup, "avcodec-skiploopfilter");
 
-        #define CaC(name, factor) config_PutInt(p_intf, name, [[_input_cachelevelPopup selectedItem] tag] * factor)
+        #define CaC(name, factor) config_PutInt(name, [[_input_cachelevelPopup selectedItem] tag] * factor)
         if ([[_input_cachelevelPopup selectedItem] tag] == 0) {
             msg_Dbg(p_intf, "Custom chosen, not adjusting cache values");
         } else {
@@ -1047,20 +1018,20 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
      * subtitles settings *
      **********************/
     if (_osdSettingChanged) {
-        config_PutInt(p_intf, "osd", [_osd_osdCheckbox state]);
+        config_PutInt("osd", [_osd_osdCheckbox state]);
 
         if ([_osd_encodingPopup indexOfSelectedItem] >= 0)
             SaveStringList(_osd_encodingPopup, "subsdec-encoding");
         else
-            config_PutPsz(p_intf, "subsdec-encoding", "");
+            config_PutPsz("subsdec-encoding", "");
 
-        config_PutPsz(p_intf, "sub-language", [[_osd_langTextField stringValue] UTF8String]);
+        config_PutPsz("sub-language", [[_osd_langTextField stringValue] UTF8String]);
 
-        config_PutPsz(p_intf, "freetype-font", [[_osd_fontTextField stringValue] UTF8String]);
+        config_PutPsz("freetype-font", [[_osd_fontTextField stringValue] UTF8String]);
         SaveIntList(_osd_font_colorPopup, "freetype-color");
         SaveIntList(_osd_font_sizePopup, "freetype-rel-fontsize");
-        config_PutInt(p_intf, "freetype-opacity", [_osd_opacityTextField intValue] * 255.0 / 100.0 + 0.5);
-        config_PutInt(p_intf, "freetype-bold", [_osd_forceboldCheckbox state]);
+        config_PutInt("freetype-opacity", [_osd_opacityTextField intValue] * 255.0 / 100.0 + 0.5);
+        config_PutInt("freetype-bold", [_osd_forceboldCheckbox state]);
         SaveIntList(_osd_outline_colorPopup, "freetype-outline-color");
         SaveIntList(_osd_outline_thicknessPopup, "freetype-outline-thickness");
         _osdSettingChanged = NO;
@@ -1072,11 +1043,11 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     if (_hotkeyChanged) {
         NSUInteger hotKeyCount = [_hotkeySettings count];
         for (NSUInteger i = 0; i < hotKeyCount; i++)
-            config_PutPsz(p_intf, [[_hotkeyNames objectAtIndex:i] UTF8String], [[_hotkeySettings objectAtIndex:i]UTF8String]);
+            config_PutPsz([[_hotkeyNames objectAtIndex:i] UTF8String], [[_hotkeySettings objectAtIndex:i]UTF8String]);
         _hotkeyChanged = NO;
     }
 
-    [[VLCCoreInteraction sharedInstance] fixPreferences];
+    [[VLCCoreInteraction sharedInstance] fixIntfSettings];
 
     /* okay, let's save our changes to vlcrc */
     config_SaveConfigFile(p_intf);
@@ -1085,39 +1056,19 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
     [[NSNotificationCenter defaultCenter] postNotificationName:VLCConfigurationChangedNotification object:nil];
 }
 
-- (void)showSettingsForCategory:(id)new_categoryView
+- (void)showSettingsForCategory:(NSView *)categoryView
 {
-    NSRect win_rect, view_rect, oldView_rect;
-    win_rect = [self.window frame];
-    view_rect = [new_categoryView frame];
+    [_contentView setSubviews:[NSArray array]];
+    [_contentView addSubview:categoryView];
 
-    if (_currentlyShownCategoryView == new_categoryView)
-        return;
+    NSDictionary *views = @{ @"view": categoryView };
+    NSArray *constraints = [NSLayoutConstraint constraintsWithVisualFormat:@"|[view]|" options:0 metrics:nil views:views];
+    [_contentView addConstraints:constraints];
+    constraints = [NSLayoutConstraint constraintsWithVisualFormat:@"V:|[view]|" options:0 metrics:nil views:views];
+    [_contentView addConstraints:constraints];
 
-    if (_currentlyShownCategoryView != nil) {
-        /* restore our window's height, if we've shown another category previously */
-        oldView_rect = [_currentlyShownCategoryView frame];
-        win_rect.size.height = win_rect.size.height - oldView_rect.size.height;
-        win_rect.origin.y = (win_rect.origin.y + oldView_rect.size.height) - view_rect.size.height;
-    }
-
-    win_rect.size.height = win_rect.size.height + view_rect.size.height;
-
-    [new_categoryView setFrame: NSMakeRect(0,
-                                           [_controlsBox frame].size.height,
-                                           view_rect.size.width,
-                                           view_rect.size.height)];
-    [new_categoryView setAutoresizesSubviews: YES];
-    if (_currentlyShownCategoryView) {
-        [[[self.window contentView] animator] replaceSubview:_currentlyShownCategoryView with:new_categoryView];
-        [[self.window animator] setFrame:win_rect display:YES];
-    } else {
-        [[self.window contentView] addSubview:new_categoryView];
-        [self.window setFrame:win_rect display:YES animate:NO];
-    }
-
-    /* keep our current category for further reference */
-    _currentlyShownCategoryView = new_categoryView;
+    [_scrollView layoutSubtreeIfNeeded];
+    [_scrollView flashScrollers];
 }
 
 #pragma mark -
@@ -1149,6 +1100,10 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
 
 - (IBAction)interfaceSettingChanged:(id)sender
 {
+    if (sender == _intf_enableluahttpCheckbox) {
+        _intf_luahttppwdTextField.enabled = [sender state] == NSOnState;
+    }
+
     _intfSettingChanged = YES;
 }
 
@@ -1203,7 +1158,7 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
         [_selectFolderPanel setCanCreateDirectories: YES];
         [_selectFolderPanel setPrompt: _NS("Choose")];
         [_selectFolderPanel beginSheetModalForWindow:self.window completionHandler: ^(NSInteger returnCode) {
-            if (returnCode == NSOKButton) {
+            if (returnCode == NSModalResponseOK) {
                 [_video_snap_folderTextField setStringValue: [[_selectFolderPanel URL] path]];
             }
         }];
@@ -1257,7 +1212,7 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
 
 - (IBAction)showFontPicker:(id)sender
 {
-    char * font = config_GetPsz(p_intf, "freetype-font");
+    char * font = config_GetPsz("freetype-font");
     NSString * fontName = font ? toNSStr(font) : nil;
     free(font);
     if (fontName) {
@@ -1302,7 +1257,7 @@ static inline void save_string_list(intf_thread_t * p_intf, id object, const cha
         [_selectFolderPanel setCanCreateDirectories: YES];
         [_selectFolderPanel setPrompt: _NS("Choose")];
         [_selectFolderPanel beginSheetModalForWindow:self.window completionHandler: ^(NSInteger returnCode) {
-            if (returnCode == NSOKButton)
+            if (returnCode == NSModalResponseOK)
             {
                 [_input_recordTextField setStringValue: [[_selectFolderPanel URL] path]];
                 _inputSettingChanged = YES;

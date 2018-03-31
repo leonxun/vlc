@@ -29,7 +29,7 @@
 # include "config.h"
 #endif
 
-#include <vlc_common.h>    /* VLC_COMMON_MEMBERS for vlc_interface.h */
+#include <vlc_common.h>
 #include <vlc_interface.h> /* intf_thread_t */
 #include <vlc_playlist.h>  /* playlist_t */
 
@@ -41,19 +41,14 @@
 
 #define QT_NO_CAST_TO_ASCII
 #include <QString>
+#include <QUrl>
 
-#if ( QT_VERSION < 0x040800 )
-# error Update your Qt version to at least 4.8.0
+#if ( QT_VERSION < 0x050500 )
+# error Update your Qt version to at least 5.5.0
 #endif
 
-#define HAS_QT5  ( QT_VERSION >= 0x050000 )
-#define HAS_QT54 ( QT_VERSION >= 0x050400 )
 #define HAS_QT56 ( QT_VERSION >= 0x050600 )
-
-/* Q_DECL_OVERRIDE is a Qt5 feature, add empty define to not break with Qt4 */
-#if !HAS_QT5 && !defined(Q_DECL_OVERRIDE)
-# define Q_DECL_OVERRIDE
-#endif
+#define HAS_QT510 ( QT_VERSION >= 0x051000 )
 
 enum {
     DialogEventTypeOffset = 0,
@@ -77,7 +72,7 @@ struct intf_sys_t
     class QSettings *mainSettings; /* Qt State settings not messing main VLC ones */
     class PLModel *pl_model;
 
-    QString filepath;        /* Last path used in dialogs */
+    QUrl filepath;        /* Last path used in dialogs */
 
     unsigned voutWindowType; /* Type of vout_window_t provided */
     bool b_isDialogProvider; /* Qt mode or Skins mode */
@@ -137,7 +132,7 @@ struct vlc_playlist_locker {
 
 #define BUTTON_SET_IMG( button, text, image, tooltip )    \
     BUTTON_SET( button, text, tooltip );                  \
-    button->setIcon( QIcon( ":/"#image ) );
+    button->setIcon( QIcon( ":/"#image ".svg") );
 
 #define BUTTON_SET_ACT_I( button, text, image, tooltip, thisslot ) \
     BUTTON_SET_IMG( button, text, image, tooltip );                \

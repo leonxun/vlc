@@ -92,7 +92,8 @@ int OpenPacketizer( vlc_object_t *p_this )
 
     unsigned i_avcodec_id;
 
-    if( !GetFfmpegCodec( p_dec->fmt_in.i_codec, NULL, &i_avcodec_id, NULL ) )
+    if( !GetFfmpegCodec( p_dec->fmt_in.i_cat, p_dec->fmt_in.i_codec,
+                         &i_avcodec_id, NULL ) )
         return VLC_EGENERIC;
 
     /* init avcodec */
@@ -147,7 +148,6 @@ void ClosePacketizer( vlc_object_t *p_this )
         av_parser_close( p_dec->p_sys->p_parser_ctx );
         free( p_dec->p_sys );
     }
-    es_format_Clean( &p_dec->fmt_out );
 }
 
 /*****************************************************************************
@@ -190,6 +190,8 @@ static block_t *Packetize ( decoder_t *p_dec, block_t **pp_block )
     memcpy( p_ret->p_buffer, p_outdata, i_outlen );
     p_ret->i_pts = p_block->i_pts;
     p_ret->i_dts = p_block->i_dts;
+    if( p_sys->p_parser_ctx->key_frame == 1 )
+        p_ret->i_flags |= BLOCK_FLAG_TYPE_I;
 
     p_block->i_pts = p_block->i_dts = VLC_TS_INVALID;
 

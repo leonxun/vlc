@@ -91,7 +91,7 @@ static int  GraphChange  ( void *p_arg );
     "If automatic connection is enabled, only JACK clients whose names " \
     "match this regular expression will be considered for connection." )
 
-#define JACK_NAME_TEXT N_( "Jack client name" )
+#define JACK_NAME_TEXT N_( "JACK client name" )
 
 /*****************************************************************************
  * Module descriptor
@@ -262,6 +262,7 @@ static int Start( audio_output_t *p_aout, audio_sample_format_t *restrict fmt )
 
     msg_Dbg( p_aout, "JACK audio output initialized (%d channels, rate=%d)",
              p_sys->i_channels, fmt->i_rate );
+    fmt->channel_type = AUDIO_CHANNEL_TYPE_BITMAP;
 
 error_out:
     /* Clean up, if an error occurred */

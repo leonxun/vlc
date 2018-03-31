@@ -24,6 +24,10 @@
 
 #define VLC_DTS_HEADER_SIZE 14
 
+#define PROFILE_DTS_INVALID -1
+#define PROFILE_DTS 0
+#define PROFILE_DTS_HD 1
+
 typedef struct
 {
     bool            b_substream;
@@ -31,7 +35,8 @@ typedef struct
     unsigned int    i_bitrate;
     unsigned int    i_frame_size;
     unsigned int    i_frame_length;
-    uint32_t        i_original_channels;
+    uint16_t        i_physical_channels;
+    uint16_t        i_chan_mode;
 } vlc_dts_header_t;
 
 int     vlc_dts_header_Parse( vlc_dts_header_t *p_header,

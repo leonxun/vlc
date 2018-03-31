@@ -46,10 +46,10 @@ vlc_module_begin()
     set_description(N_("VDPAU output"))
     set_category(CAT_VIDEO)
     set_subcategory(SUBCAT_VIDEO_VOUT)
-    set_capability("vout display", 300)
+    set_capability("vout display", 0)
     set_callbacks(Open, Close)
 
-    add_shortcut("vdpau", "xid")
+    add_shortcut("vdpau")
 vlc_module_end()
 
 struct vout_display_sys_t
@@ -333,8 +333,6 @@ static int Control(vout_display_t *vd, int query, va_list ap)
 
     switch (query)
     {
-    case VOUT_DISPLAY_HIDE_MOUSE:
-        return VLC_EGENERIC;
     case VOUT_DISPLAY_RESET_PICTURES:
     {
         msg_Dbg(vd, "resetting pictures");
@@ -655,7 +653,6 @@ static int Open(vlc_object_t *obj)
     vd->prepare = Queue;
     vd->display = Wait;
     vd->control = Control;
-    vd->manage = NULL;
 
     return VLC_SUCCESS;
 

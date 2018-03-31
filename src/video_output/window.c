@@ -59,6 +59,7 @@ vout_window_t *vout_window_New(vlc_object_t *obj, const char *module,
     vout_window_t *window = &w->wnd;
 
     memset(&window->handle, 0, sizeof(window->handle));
+    window->info.has_double_click = false;
     window->control = NULL;
     window->sys = NULL;
 
@@ -77,11 +78,12 @@ vout_window_t *vout_window_New(vlc_object_t *obj, const char *module,
 
     /* Hook for screensaver inhibition */
     if (var_InheritBool(obj, "disable-screensaver") &&
-        window->type == VOUT_WINDOW_TYPE_XID) {
+        (window->type == VOUT_WINDOW_TYPE_XID || window->type == VOUT_WINDOW_TYPE_HWND
+      || window->type == VOUT_WINDOW_TYPE_WAYLAND))
+    {
         w->inhibit = vlc_inhibit_Create(VLC_OBJECT (window));
         if (w->inhibit != NULL)
             vlc_inhibit_Set(w->inhibit, VLC_INHIBIT_VIDEO);
-            /* FIXME: ^ wait for vout activation, pause */
     }
     else
         w->inhibit = NULL;
@@ -108,8 +110,17 @@ void vout_window_Delete(vout_window_t *window)
         vlc_inhibit_Destroy (w->inhibit);
     }
 
-    vlc_module_unload(w->module, vout_window_stop, window);
+    vlc_module_unload(window, w->module, vout_window_stop, window);
     vlc_object_release(window);
+}
+
+void vout_window_SetInhibition(vout_window_t *window, bool enabled)
+{
+    window_t *w = (window_t *)window;
+    unsigned flags = enabled ? VLC_INHIBIT_VIDEO : VLC_INHIBIT_NONE;
+
+    if (w->inhibit != NULL)
+        vlc_inhibit_Set(w->inhibit, flags);
 }
 
 /* Video output display integration */
@@ -171,6 +182,7 @@ vout_window_t *vout_display_window_New(vout_thread_t *vout,
     state->height = cfg->height;
     vlc_mutex_init(&state->lock);
 
+    char *modlist = var_InheritString(vout, "window");
     vout_window_owner_t owner = {
         .sys = state,
         .resized = vout_display_window_ResizeNotify,
@@ -179,7 +191,8 @@ vout_window_t *vout_display_window_New(vout_thread_t *vout,
     };
     vout_window_t *window;
 
-    window = vout_window_New((vlc_object_t *)vout, "$window", cfg, &owner);
+    window = vout_window_New((vlc_object_t *)vout, modlist, cfg, &owner);
+    free(modlist);
     if (window == NULL) {
         vlc_mutex_destroy(&state->lock);
         free(state);

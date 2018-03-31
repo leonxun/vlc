@@ -231,7 +231,10 @@ static const staticentry_t p_list_video[] = {
         A("H265"),
         A("x265"),
         A("hev1"),
+        A("hvc1"),
         A("HM10"),
+        E("dvhe", "Dolby Vision HEVC (H.265)"),
+        /* E("dvh1", "Dolby Vision HEVC (H.265)"), Collides with DV */
 
     /* h264 */
     B(VLC_CODEC_H264, "H264 - MPEG-4 AVC (part 10)"),
@@ -257,6 +260,8 @@ static const staticentry_t p_list_video[] = {
         E("ai13", "AVC-Intra 100M 1080p24/30/60"),
         E("ai15", "AVC-Intra 100M 1080i50"),
         E("ai16", "AVC-Intra 100M 1080i60"),
+        E("dvav", "Dolby Vision H264"),
+        E("dva1", "Dolby Vision H264"),
         E("VSSH", "Vanguard VSS H264"),
         E("VSSW", "Vanguard VSS H264"),
         E("vssh", "Vanguard VSS H264"),
@@ -794,6 +799,10 @@ static const staticentry_t p_list_video[] = {
         A("AV32"),
     B(VLC_CODEC_BGRA, "32 bits BGRA"),
         A("BGRA"),
+    B(VLC_CODEC_RGBA10, "32 bits RGB 10bits A 2bits"),
+        A("RGA0"),
+    B(VLC_CODEC_RGBA64, "64 bits RGBA"),
+        A("RGA4"),
 
     B(VLC_CODEC_GREY, "8 bits greyscale"),
         A("GREY"),
@@ -829,6 +838,9 @@ static const staticentry_t p_list_video[] = {
 
     B(VLC_CODEC_V210, "10-bit 4:2:2 Component YCbCr"),
         A("v210"),
+
+    B(VLC_CODEC_VUYA, "Packed YUV 4:4:4, V:U:Y:A"),
+        A("VUYA"),
 
     B(VLC_CODEC_NV12, "Biplanar 4:2:0 Y/UV"),
         A("NV12"),
@@ -991,6 +1003,9 @@ static const staticentry_t p_list_video[] = {
         A("LJ2C"),
         A("LJ2K"),
 
+    B(VLC_CODEC_WEBP, "WebP Image"),
+        A("WEBP"),
+
     B(VLC_CODEC_LAGARITH, "Lagarith Lossless"),
         A("LAGS"),
 
@@ -1120,6 +1135,15 @@ static const staticentry_t p_list_video[] = {
 
     B(VLC_CODEC_PIXLET, "Apple Pixlet" ),
         A("pxlt"),
+
+    B(VLC_CODEC_MAGICYUV, "MagicYUV lossless" ),
+        A("M8RG"),
+        A("M8RA"),
+        A("M8G0"),
+        A("M8Y0"),
+        A("M8Y2"),
+        A("M8Y4"),
+        A("M8YA"),
 };
 
 static const staticentry_t p_list_audio[] = {
@@ -1307,6 +1331,9 @@ static const staticentry_t p_list_audio[] = {
         A("ms\x00\x61"),
 
     B(VLC_CODEC_ADPCM_THP, "GameCube THP ADPCM"),
+
+    B(VLC_CODEC_ADPCM_XA_EA, "EA-XA ADPCM"),
+        A("XAJ\x00"),
 
     /* AMR */
     B(VLC_CODEC_AMR_NB, "AMR narrow band"),
@@ -1594,12 +1621,10 @@ static const staticentry_t p_list_spu[] = {
     B(VLC_CODEC_SCTE_27, "SCTE-27 subtitles"),
         A("SC27"),
 
-    B(VLC_CODEC_EIA608_1, "EIA-608 subtitles"),
-        A("cc1 "),
-        A("cc2 "),
-        A("cc3 "),
-        A("cc4 "),
+    B(VLC_CODEC_CEA608,  "EIA-608 subtitles"),
 
     B(VLC_CODEC_TTML, "TTML subtitles"),
         A("ttml"),
+
+    B(VLC_CODEC_WEBVTT, "WEBVTT subtitles"),
 };

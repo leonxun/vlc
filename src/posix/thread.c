@@ -29,10 +29,10 @@
 #endif
 
 #include <vlc_common.h>
-#include <vlc_atomic.h>
 
 #include "libvlc.h"
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <signal.h>
 #include <errno.h>
 #include <time.h>
@@ -367,6 +367,12 @@ void vlc_rwlock_unlock (vlc_rwlock_t *lock)
     VLC_THREAD_ASSERT ("releasing R/W lock");
 }
 
+void vlc_once(vlc_once_t *once, void (*cb)(void))
+{
+    int val = pthread_once(once, cb);
+    VLC_THREAD_ASSERT("initializing once");
+}
+
 int vlc_threadvar_create (vlc_threadvar_t *key, void (*destr) (void *))
 {
     return pthread_key_create (key, destr);
@@ -550,12 +556,10 @@ vlc_thread_t vlc_thread_self (void)
     return thread;
 }
 
-#if !defined (__linux__)
-unsigned long vlc_thread_id (void)
+VLC_WEAK unsigned long vlc_thread_id(void)
 {
      return -1;
 }
-#endif
 
 int vlc_set_priority (vlc_thread_t th, int priority)
 {
@@ -698,7 +702,7 @@ unsigned vlc_GetCPUCount(void)
     u_int numcpus;
     processor_info_t cpuinfo;
 
-    processorid_t *cpulist = malloc (sizeof (*cpulist) * sysconf(_SC_NPROCESSORS_MAX));
+    processorid_t *cpulist = vlc_alloc (sysconf(_SC_NPROCESSORS_MAX), sizeof (*cpulist));
     if (unlikely(cpulist == NULL))
         return 1;
 
